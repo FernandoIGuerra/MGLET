@@ -37,7 +37,7 @@ CONTAINS
         INTEGER(intk) :: idx, scbtype(nsca)
         REAL(realk), POINTER, CONTIGUOUS :: qtu(:, :, :), t(:, :, :), &
             bt(:, :, :), u(:, :, :), v(:, :, :), w(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: qtubuf(:, :, :), tbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: qtubuf(:, :), tbuf(:, :)
         REAL(realk), POINTER, CONTIGUOUS :: dx(:), ddx(:), ddy(:), ddz(:)
 
         ! Return early when no action is to be taken
@@ -60,10 +60,10 @@ CONTAINS
         ! CALL f3%get_ptr(qtw, igrid)
         CALL f4%get_ptr(t, igrid)
 
-        CALL f1%buffers%get_buffer(qtubuf, igrid, iface)
-        ! CALL f2%buffers%get_buffer(qtvbuf, igrid, iface)
-        ! CALL f3%buffers%get_buffer(qtwbuf, igrid, iface)
-        CALL f4%buffers%get_buffer(tbuf, igrid, iface)
+        CALL f1%get_buffer(qtubuf, igrid, iface)
+        ! CALL f2%get_buffer(qtvbuf, igrid, iface)
+        ! CALL f3%get_buffer(qtwbuf, igrid, iface)
+        CALL f4%get_buffer(tbuf, igrid, iface)
 
         CALL get_fieldptr(u, "U", igrid)
         CALL get_fieldptr(v, "V", igrid)
@@ -112,7 +112,7 @@ CONTAINS
                     arecvtot = area1 + area2 + area3 + area4
 
                     ! Coarse grid flux
-                    qtot = qtubuf(k, j, 1)
+                    qtot = qtubuf(k, j)
 
                     ! Distributing flux proportionally to receiver cells
                     qtu(k, j, istag2) = divide0(area1, arecvtot)*qtot
@@ -135,7 +135,7 @@ CONTAINS
                         DO k = 1, kk
                             ! Setting the scalar diffusive flux from the wall
                             ! Wall buffer tbuf contains set scalar value
-                            diff = gamma2dx*(tbuf(k, j, 1) - t(k, j, i3))
+                            diff = gamma2dx*(tbuf(k, j) - t(k, j, i3))
                             qtu(k, j, istag2) = -dir*diff*ddy(j)*ddz(k)
                         END DO
                     END DO
@@ -150,7 +150,7 @@ CONTAINS
                                     /ddz(k)*ddz(k-1)*0.5)**2.0 + &
                                 (v(k, j-1, i3) + (v(k, j, i3)-v(k, j-1, i3)) &
                                     /ddy(j)*ddy(j-1)*0.5)**2.0)
-                            qtu(k, j, istag2) = -dir*qwallfix(tbuf(k, j, 1), &
+                            qtu(k, j, istag2) = -dir*qwallfix(tbuf(k, j), &
                                 t(k, j, i3), uquer, ddx(i3), prmol)*area
                         END DO
                     END DO
@@ -160,7 +160,7 @@ CONTAINS
                     DO k = 1, kk
                         ! Wall buffer tbuf contains flux at this boundary
                         area = ddy(j)*ddz(k)
-                        qtu(k, j, istag2) = -dir*tbuf(k, j, 1)*area
+                        qtu(k, j, istag2) = -dir*tbuf(k, j)*area
                     END DO
                 END DO
             CASE DEFAULT
@@ -180,7 +180,7 @@ CONTAINS
                     DO k = 1, kk
                         IF (-dir*u(k, j, istag2) >= 0.0) THEN
                             ! flow into the domain (requires specified value)
-                            tout = 2.0*tbuf(k, j, 1) - t(k, j, i3)
+                            tout = 2.0*tbuf(k, j) - t(k, j, i3)
                         ELSE
                             ! flow out of the domain (zero-gradient)
                             tout = t(k, j, i3)
@@ -201,7 +201,7 @@ CONTAINS
                     DO k = 1, kk
                         ! Wall buffer tbuf contains flux at this boundary
                         area = ddy(j)*ddz(k)
-                        qtu(k, j, istag2) = -dir*tbuf(k, j, 1)*area
+                        qtu(k, j, istag2) = -dir*tbuf(k, j)*area
                     END DO
                 END DO
             CASE DEFAULT
@@ -227,7 +227,7 @@ CONTAINS
         INTEGER(intk) :: idx, scbtype(nsca)
         REAL(realk), POINTER, CONTIGUOUS :: qtv(:, :, :), t(:, :, :), &
             bt(:, :, :), u(:, :, :), v(:, :, :), w(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: qtvbuf(:, :, :), tbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: qtvbuf(:, :), tbuf(:, :)
         REAL(realk), POINTER, CONTIGUOUS :: dy(:), ddx(:), ddy(:), ddz(:)
 
         ! Return early when no action is to be taken
@@ -250,10 +250,10 @@ CONTAINS
         ! CALL f3%get_ptr(qtw, igrid)
         CALL f4%get_ptr(t, igrid)
 
-        ! CALL f1%buffers%get_buffer(qtubuf, igrid, iface)
-        CALL f2%buffers%get_buffer(qtvbuf, igrid, iface)
-        ! CALL f3%buffers%get_buffer(qtwbuf, igrid, iface)
-        CALL f4%buffers%get_buffer(tbuf, igrid, iface)
+        ! CALL f1%get_buffer(qtubuf, igrid, iface)
+        CALL f2%get_buffer(qtvbuf, igrid, iface)
+        ! CALL f3%get_buffer(qtwbuf, igrid, iface)
+        CALL f4%get_buffer(tbuf, igrid, iface)
 
         CALL get_fieldptr(u, "U", igrid)
         CALL get_fieldptr(v, "V", igrid)
@@ -302,7 +302,7 @@ CONTAINS
                     arecvtot = area1 + area2 + area3 + area4
 
                     ! Coarse grid flux
-                    qtot = qtvbuf(k, i, 1)
+                    qtot = qtvbuf(k, i)
 
                     ! Distributing flux proportionally to receiver cells
                     qtv(k, jstag2, i) = divide0(area1, arecvtot)*qtot
@@ -325,7 +325,7 @@ CONTAINS
                         DO k = 1, kk
                             ! Setting the scalar diffusive flux from the wall
                             ! Wall buffer tbuf contains set scalar value
-                            diff = gamma2dx*(tbuf(k, i, 1) - t(k, j3, i))
+                            diff = gamma2dx*(tbuf(k, i) - t(k, j3, i))
                             qtv(k, jstag2, i) = -dir*diff*ddx(i)*ddz(k)
                         END DO
                     END DO
@@ -340,7 +340,7 @@ CONTAINS
                                     /ddz(k)*ddz(k-1)*0.5)**2.0 + &
                                 (u(k, j3, i-1) + (u(k, j3, i)-u(k, j3, i-1)) &
                                     /ddx(i)*ddx(i-1)*0.5)**2.0)
-                            qtv(k, jstag2, i) = -dir*qwallfix(tbuf(k, i, 1), &
+                            qtv(k, jstag2, i) = -dir*qwallfix(tbuf(k, i), &
                                 t(k, j3, i), uquer, ddy(j3), prmol)*area
                         END DO
                     END DO
@@ -350,7 +350,7 @@ CONTAINS
                     DO k = 1, kk
                         ! Wall buffer tbuf contains flux at this boundary
                         area = ddx(i)*ddz(k)
-                        qtv(k, jstag2, i) = -dir*tbuf(k, i, 1)*area
+                        qtv(k, jstag2, i) = -dir*tbuf(k, i)*area
                     END DO
                 END DO
             CASE DEFAULT
@@ -370,7 +370,7 @@ CONTAINS
                     DO k = 1, kk
                         IF (-dir*v(k, jstag2, i) >= 0.0) THEN
                             ! flow into the domain (requires specified value)
-                            tout = 2.0*tbuf(k, i, 1) - t(k, j3, i)
+                            tout = 2.0*tbuf(k, i) - t(k, j3, i)
                         ELSE
                             ! flow out of the domain (zero-gradient)
                             tout = t(k, j3, i)
@@ -391,7 +391,7 @@ CONTAINS
                     DO k = 1, kk
                         ! Wall buffer tbuf contains flux at this boundary
                         area = ddx(i)*ddz(k)
-                        qtv(k, jstag2, i) = -dir*tbuf(k, i, 1)*area
+                        qtv(k, jstag2, i) = -dir*tbuf(k, i)*area
                     END DO
                 END DO
             CASE DEFAULT
@@ -417,7 +417,7 @@ CONTAINS
         INTEGER(intk) :: idx, scbtype(nsca)
         REAL(realk), POINTER, CONTIGUOUS :: qtw(:, :, :), t(:, :, :), &
             bt(:, :, :), u(:, :, :), v(:, :, :), w(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: qtwbuf(:, :, :), tbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: qtwbuf(:, :), tbuf(:, :)
         REAL(realk), POINTER, CONTIGUOUS :: dz(:), ddx(:), ddy(:), ddz(:)
 
         ! Return early when no action is to be taken
@@ -440,10 +440,10 @@ CONTAINS
         CALL f3%get_ptr(qtw, igrid)
         CALL f4%get_ptr(t, igrid)
 
-        ! CALL f1%buffers%get_buffer(qtubuf, igrid, iface)
-        ! CALL f2%buffers%get_buffer(qtvbuf, igrid, iface)
-        CALL f3%buffers%get_buffer(qtwbuf, igrid, iface)
-        CALL f4%buffers%get_buffer(tbuf, igrid, iface)
+        ! CALL f1%get_buffer(qtubuf, igrid, iface)
+        ! CALL f2%get_buffer(qtvbuf, igrid, iface)
+        CALL f3%get_buffer(qtwbuf, igrid, iface)
+        CALL f4%get_buffer(tbuf, igrid, iface)
 
         CALL get_fieldptr(u, "U", igrid)
         CALL get_fieldptr(v, "V", igrid)
@@ -492,7 +492,7 @@ CONTAINS
                     arecvtot = area1 + area2 + area3 + area4
 
                     ! Coarse grid flux
-                    qtot = qtwbuf(j, i, 1)
+                    qtot = qtwbuf(j, i)
 
                     ! Distributing flux proportionally to receiver cells
                     qtw(kstag2, j, i) = divide0(area1, arecvtot)*qtot
@@ -515,7 +515,7 @@ CONTAINS
                         DO j = 1, jj
                             ! Setting the scalar diffusive flux from the wall
                             ! Wall buffer tbuf contains set scalar value
-                            diff = gamma2dx*(tbuf(j, i, 1) - t(k3, j, i))
+                            diff = gamma2dx*(tbuf(j, i) - t(k3, j, i))
                             qtw(kstag2, j, i) = -dir*diff*ddx(i)*ddy(j)
                         END DO
                     END DO
@@ -530,7 +530,7 @@ CONTAINS
                                     /ddx(i)*ddx(i-1)*0.5)**2.0 + &
                                 (v(k3, j-1, i) + (v(k3, j, i)-v(k3, j-1, i)) &
                                     /ddy(j)*ddy(j-1)*0.5)**2.0)
-                            qtw(kstag2, j, i) = -dir*qwallfix(tbuf(j, i, 1), &
+                            qtw(kstag2, j, i) = -dir*qwallfix(tbuf(j, i), &
                                 t(k3, j, i), uquer, ddz(k3), prmol)*area
                         END DO
                     END DO
@@ -540,7 +540,7 @@ CONTAINS
                     DO j = 1, jj
                         ! Wall buffer tbuf contains flux at this boundary
                         area = ddx(i)*ddy(j)
-                        qtw(kstag2, j, i) = -dir*tbuf(j, i, 1)*area
+                        qtw(kstag2, j, i) = -dir*tbuf(j, i)*area
                     END DO
                 END DO
             CASE DEFAULT
@@ -560,7 +560,7 @@ CONTAINS
                     DO j = 1, jj
                         IF (-dir*w(kstag2, j, i) >= 0.0) THEN
                             ! flow into the domain (requires specified value)
-                            tout = 2.0*tbuf(j, i, 1) - t(k3, j, i)
+                            tout = 2.0*tbuf(j, i) - t(k3, j, i)
                         ELSE
                             ! flow out of the domain (zero-gradient)
                             tout = t(k3, j, i)
@@ -581,7 +581,7 @@ CONTAINS
                     DO j = 1, jj
                         ! Wall buffer tbuf contains flux at this boundary
                         area = ddx(i)*ddy(j)
-                        qtw(kstag2, j, i) = -dir*tbuf(j, i, 1)*area
+                        qtw(kstag2, j, i) = -dir*tbuf(j, i)*area
                     END DO
                 END DO
             CASE DEFAULT
@@ -589,5 +589,4 @@ CONTAINS
             END SELECT
         END SELECT
     END SUBROUTINE bbottom
-
 END MODULE bound_scalar_mod

@@ -50,7 +50,7 @@ CONTAINS
             CALL get_field(dt_f, "D"//TRIM(scalar(l)%name))
             CALL get_field(told, TRIM(scalar(l)%name)//"_OLD")
 
-            ! Copy to "T_OLD"
+            ! Copy to "T_OLD" (not needed here but used for Boussinesq)
             told%arr = t%arr
 
             ! TSTSCA4 zeroize qtu, qtv, qtw before use internally
@@ -92,7 +92,7 @@ CONTAINS
             END IF
 
             DO ilevel = maxlevel, minlevel+1, -1
-                CALL ftoc(ilevel, t%arr, t%arr, 'T')
+                CALL ftoc(ilevel, t, t, 'T')
             END DO
 
             CALL connect(layers=2, s1=t, corners=.TRUE.)

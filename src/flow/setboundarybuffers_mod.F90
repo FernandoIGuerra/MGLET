@@ -33,8 +33,10 @@ CONTAINS
         REAL(realk), POINTER, CONTIGUOUS :: xstag(:), y(:), z(:)
         REAL(realk), POINTER, CONTIGUOUS :: dx(:), dy(:), dz(:)
         REAL(realk), POINTER, CONTIGUOUS :: ddy(:), ddz(:)
-        REAL(realk), POINTER, CONTIGUOUS :: ubuf(:, :, :), vbuf(:, :, :), &
-            wbuf(:, :, :), bubuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: ubuf(:, :), vbuf(:, :), &
+            wbuf(:, :), bubuf(:, :)
+        REAL(realk), POINTER, CONTIGUOUS :: ubuf3(:, :, :), vbuf3(:, :, :), &
+            wbuf3(:, :, :)
 #ifdef _CRAYFTN
         ! Cray ftn will pass the lower-bound of allocatable and pointers
         ! all the way into a the dim->lower_bound CFI_cdesc_t structure.
@@ -46,7 +48,7 @@ CONTAINS
         ! a workaround for Cray.
         REAL(realk), ALLOCATABLE :: xbuf(:), dxbuf(:)
 #else
-        REAL(realk) :: xbuf(2), dxbuf(2)
+        REAL(realk) :: xbuf(1), dxbuf(1)
 #endif
         TYPE(field_t), POINTER :: bu
 
@@ -67,9 +69,12 @@ CONTAINS
         IF (.NOT. PRESENT(timeph)) CALL errr(__FILE__, __LINE__)
 
         ! Fetch pointers
-        CALL f1%buffers%get_buffer(ubuf, igrid, iface)
-        CALL f2%buffers%get_buffer(vbuf, igrid, iface)
-        CALL f3%buffers%get_buffer(wbuf, igrid, iface)
+        CALL f1%get_buffer(ubuf, igrid, iface)
+        CALL f2%get_buffer(vbuf, igrid, iface)
+        CALL f3%get_buffer(wbuf, igrid, iface)
+        ubuf3(1:SIZE(ubuf, 1), 1:SIZE(ubuf, 2), 1:1) => ubuf
+        vbuf3(1:SIZE(vbuf, 1), 1:SIZE(vbuf, 2), 1:1) => vbuf
+        wbuf3(1:SIZE(wbuf, 1), 1:SIZE(wbuf, 2), 1:1) => wbuf
 
         IF (uinf_is_expr) THEN
             CALL get_fieldptr(xstag, "XSTAG", igrid)
@@ -84,8 +89,8 @@ CONTAINS
             CALL get_fieldptr(ddz, "DDZ", igrid)
 
 #ifdef _CRAYFTN
-            ALLOCATE(xbuf(2))
-            ALLOCATE(dxbuf(2))
+            ALLOCATE(xbuf(1))
+            ALLOCATE(dxbuf(1))
 #endif
 
             SELECT CASE (iface)
@@ -101,11 +106,11 @@ CONTAINS
                 CALL errr(__FILE__, __LINE__)
             END SELECT
 
-            CALL initial_condition(ubuf, "u", uinf_expr(1), rho, gmol, &
+            CALL initial_condition(ubuf3, "u", uinf_expr(1), rho, gmol, &
                 tu_level, timeph, xbuf, y, z, dxbuf, dy, dz, dxbuf, ddy, ddz)
-            CALL initial_condition(vbuf, "v", uinf_expr(2), rho, gmol, &
+            CALL initial_condition(vbuf3, "v", uinf_expr(2), rho, gmol, &
                 tu_level, timeph, xbuf, y, z, dxbuf, dy, dz, dxbuf, ddy, ddz)
-            CALL initial_condition(wbuf, "w", uinf_expr(3), rho, gmol, &
+            CALL initial_condition(wbuf3, "w", uinf_expr(3), rho, gmol, &
                 tu_level, timeph, xbuf, y, z, dxbuf, dy, dz, dxbuf, ddy, ddz)
         ELSE
             ubuf = uinf(1)
@@ -119,7 +124,7 @@ CONTAINS
         ! This multiplies with the open fraction of a cell in the FIX boundary
         ! condition. This is done to ensure that the inflow is divergence free
         CALL get_field(bu, "BU")
-        CALL bu%buffers%get_buffer(bubuf, igrid, iface)
+        CALL bu%get_buffer(bubuf, igrid, iface)
         ubuf = ubuf*bubuf
     END SUBROUTINE bfront
 
@@ -136,13 +141,16 @@ CONTAINS
         REAL(realk), POINTER, CONTIGUOUS :: x(:), ystag(:), z(:)
         REAL(realk), POINTER, CONTIGUOUS :: dx(:), dy(:), dz(:)
         REAL(realk), POINTER, CONTIGUOUS :: ddx(:), ddz(:)
-        REAL(realk), POINTER, CONTIGUOUS :: ubuf(:, :, :), vbuf(:, :, :), &
-            wbuf(:, :, :), bvbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: ubuf(:, :), vbuf(:, :), &
+            wbuf(:, :), bvbuf(:, :)
+        REAL(realk), POINTER, CONTIGUOUS :: ubuf3(:, :, :), vbuf3(:, :, :), &
+            wbuf3(:, :, :)
+
 #ifdef _CRAYFTN
         ! See comment in bfront routine in this file
         REAL(realk), ALLOCATABLE :: ybuf(:), dybuf(:)
 #else
-        REAL(realk) :: ybuf(2), dybuf(2)
+        REAL(realk) :: ybuf(1), dybuf(1)
 #endif
         TYPE(field_t), POINTER :: bv
 
@@ -163,9 +171,12 @@ CONTAINS
         IF (.NOT. PRESENT(timeph)) CALL errr(__FILE__, __LINE__)
 
         ! Fetch pointers
-        CALL f1%buffers%get_buffer(ubuf, igrid, iface)
-        CALL f2%buffers%get_buffer(vbuf, igrid, iface)
-        CALL f3%buffers%get_buffer(wbuf, igrid, iface)
+        CALL f1%get_buffer(ubuf, igrid, iface)
+        CALL f2%get_buffer(vbuf, igrid, iface)
+        CALL f3%get_buffer(wbuf, igrid, iface)
+        ubuf3(1:SIZE(ubuf, 1), 1:SIZE(ubuf, 2), 1:1) => ubuf
+        vbuf3(1:SIZE(vbuf, 1), 1:SIZE(vbuf, 2), 1:1) => vbuf
+        wbuf3(1:SIZE(wbuf, 1), 1:SIZE(wbuf, 2), 1:1) => wbuf
 
         IF (uinf_is_expr) THEN
             CALL get_fieldptr(x, "X", igrid)
@@ -180,8 +191,8 @@ CONTAINS
             CALL get_fieldptr(ddz, "DDZ", igrid)
 
 #ifdef _CRAYFTN
-            ALLOCATE(ybuf(2))
-            ALLOCATE(dybuf(2))
+            ALLOCATE(ybuf(1))
+            ALLOCATE(dybuf(1))
 #endif
 
             SELECT CASE (iface)
@@ -197,11 +208,11 @@ CONTAINS
                 CALL errr(__FILE__, __LINE__)
             END SELECT
 
-            CALL initial_condition(ubuf, "u", uinf_expr(1), rho, gmol, &
+            CALL initial_condition(ubuf3, "u", uinf_expr(1), rho, gmol, &
                 tu_level, timeph, ybuf, x, z, dybuf, dx, dz, dybuf, ddx, ddz)
-            CALL initial_condition(vbuf, "v", uinf_expr(2), rho, gmol, &
+            CALL initial_condition(vbuf3, "v", uinf_expr(2), rho, gmol, &
                 tu_level, timeph, ybuf, x, z, dybuf, dx, dz, dybuf, ddx, ddz)
-            CALL initial_condition(wbuf, "w", uinf_expr(3), rho, gmol, &
+            CALL initial_condition(wbuf3, "w", uinf_expr(3), rho, gmol, &
                 tu_level, timeph, ybuf, x, z, dybuf, dx, dz, dybuf, ddx, ddz)
         ELSE
             ubuf = uinf(1)
@@ -215,7 +226,7 @@ CONTAINS
         ! This multiplies with the open fraction of a cell in the FIX boundary
         ! condition. This is done to ensure that the inflow is divergence free
         CALL get_field(bv, "BV")
-        CALL bv%buffers%get_buffer(bvbuf, igrid, iface)
+        CALL bv%get_buffer(bvbuf, igrid, iface)
         vbuf = vbuf*bvbuf
     END SUBROUTINE bright
 
@@ -232,13 +243,15 @@ CONTAINS
         REAL(realk), POINTER, CONTIGUOUS :: x(:), y(:), zstag(:)
         REAL(realk), POINTER, CONTIGUOUS :: dx(:), dy(:), dz(:)
         REAL(realk), POINTER, CONTIGUOUS :: ddx(:), ddy(:)
-        REAL(realk), POINTER, CONTIGUOUS :: ubuf(:, :, :), vbuf(:, :, :), &
-            wbuf(:, :, :), bwbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: ubuf(:, :), vbuf(:, :), &
+            wbuf(:, :), bwbuf(:, :)
+        REAL(realk), POINTER, CONTIGUOUS :: ubuf3(:, :, :), vbuf3(:, :, :), &
+            wbuf3(:, :, :)
 #ifdef _CRAYFTN
         ! See comment in bfront routine in this file
         REAL(realk), ALLOCATABLE :: zbuf(:), dzbuf(:)
 #else
-        REAL(realk) :: zbuf(2), dzbuf(2)
+        REAL(realk) :: zbuf(1), dzbuf(1)
 #endif
         TYPE(field_t), POINTER :: bw
 
@@ -259,9 +272,12 @@ CONTAINS
         IF (.NOT. PRESENT(timeph)) CALL errr(__FILE__, __LINE__)
 
         ! Fetch pointers
-        CALL f1%buffers%get_buffer(ubuf, igrid, iface)
-        CALL f2%buffers%get_buffer(vbuf, igrid, iface)
-        CALL f3%buffers%get_buffer(wbuf, igrid, iface)
+        CALL f1%get_buffer(ubuf, igrid, iface)
+        CALL f2%get_buffer(vbuf, igrid, iface)
+        CALL f3%get_buffer(wbuf, igrid, iface)
+        ubuf3(1:SIZE(ubuf, 1), 1:SIZE(ubuf, 2), 1:1) => ubuf
+        vbuf3(1:SIZE(vbuf, 1), 1:SIZE(vbuf, 2), 1:1) => vbuf
+        wbuf3(1:SIZE(wbuf, 1), 1:SIZE(wbuf, 2), 1:1) => wbuf
 
         IF (uinf_is_expr) THEN
             CALL get_fieldptr(x, "X", igrid)
@@ -276,8 +292,8 @@ CONTAINS
             CALL get_fieldptr(ddy, "DDY", igrid)
 
 #ifdef _CRAYFTN
-            ALLOCATE(zbuf(2))
-            ALLOCATE(dzbuf(2))
+            ALLOCATE(zbuf(1))
+            ALLOCATE(dzbuf(1))
 #endif
 
             SELECT CASE (iface)
@@ -293,11 +309,11 @@ CONTAINS
                 CALL errr(__FILE__, __LINE__)
             END SELECT
 
-            CALL initial_condition(ubuf, "u", uinf_expr(1), rho, gmol, &
+            CALL initial_condition(ubuf3, "u", uinf_expr(1), rho, gmol, &
                 tu_level, timeph, zbuf, x, y, dzbuf, dx, dy, dzbuf, ddx, ddy)
-            CALL initial_condition(vbuf, "v", uinf_expr(2), rho, gmol, &
+            CALL initial_condition(vbuf3, "v", uinf_expr(2), rho, gmol, &
                 tu_level, timeph, zbuf, x, y, dzbuf, dx, dy, dzbuf, ddx, ddy)
-            CALL initial_condition(wbuf, "w", uinf_expr(3), rho, gmol, &
+            CALL initial_condition(wbuf3, "w", uinf_expr(3), rho, gmol, &
                 tu_level, timeph, zbuf, x, y, dzbuf, dx, dy, dzbuf, ddx, ddy)
         ELSE
             ubuf = uinf(1)
@@ -311,7 +327,7 @@ CONTAINS
         ! This multiplies with the open fraction of a cell in the FIX boundary
         ! condition. This is done to ensure that the inflow is divergence free
         CALL get_field(bw, "BW")
-        CALL bw%buffers%get_buffer(bwbuf, igrid, iface)
+        CALL bw%get_buffer(bwbuf, igrid, iface)
         wbuf = wbuf*bwbuf
     END SUBROUTINE bbottom
 END MODULE setboundarybuffers_mod

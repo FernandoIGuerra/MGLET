@@ -35,10 +35,23 @@ MODULE ib_mod
 
 CONTAINS
     SUBROUTINE init_ib()
-        USE core_mod, ONLY: set_timer
+        USE core_mod, ONLY: set_timer, fort7, errr
 
-        CALL register_ib("ghostcell", gc_constructor)
-        CALL register_ib("noib", noib_constructor)
+        ! Local variables
+        CHARACTER(len=16) :: ctyp
+
+        ! Allocate IB model object
+        CALL fort7%get_value("/ib/type", ctyp)
+
+        SELECT CASE (TRIM(ctyp))
+        CASE ("noib")
+            CALL noib_constructor(ib)
+        CASE ("ghostcell")
+            CALL gc_constructor(ib)
+        CASE DEFAULT
+            WRITE(*, '(A)') "Error: Unknown IB type: "//TRIM(ctyp)
+            CALL errr(__FILE__, __LINE__)
+        END SELECT
 
         CALL init_ibcore()
         CALL init_ctof()
@@ -65,25 +78,19 @@ CONTAINS
         USE core_mod
 
         ! Local variables
-        INTEGER :: ilevel
-        REAL(realk), ALLOCATABLE :: hilf(:)
+        INTEGER(intk) :: ilevel
+        TYPE(field_t) :: hilf
         TYPE(field_t), POINTER :: finecell
 
         CALL set_field("FINECELL")
         CALL get_field(finecell, "FINECELL")
         finecell%arr = 1.0
 
-        ALLOCATE(hilf(SIZE(finecell%arr)))
-        hilf = 0.0
-
+        CALL hilf%init("HILF")
         DO ilevel = maxlevel, minlevel, -1
-            CALL ftoc(ilevel, hilf, finecell%arr, 'P')
+            CALL ftoc(ilevel, hilf, finecell, 'P')
         END DO
-
-        DO ilevel = maxlevel, minlevel, -1
-            CALL connect(ilevel, 2, s1=finecell, corners=.TRUE.)
-        END DO
-
-        DEALLOCATE(hilf)
+        CALL connect(layers=2, s1=finecell, corners=.TRUE.)
+        CALL hilf%finish()
     END SUBROUTINE set_finecell
 END MODULE ib_mod

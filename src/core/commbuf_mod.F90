@@ -5,13 +5,10 @@ MODULE commbuf_mod
 
     USE precision_mod, ONLY: int64, intk, realk, int_bytes, real_bytes, &
         ifk, ifk_bytes
-    USE pointers_mod, ONLY: idim2d, idim3d
+    USE pointers_mod, ONLY: idim3d
 
     IMPLICIT NONE (type, external)
     PRIVATE
-
-    ! Maximum number of variables in any connect-call
-    INTEGER(intk) :: maxnvars = 6
 
     INTEGER(int64), PROTECTED :: idim_mg_bufs = 0
     INTEGER(int64), PROTECTED :: idim_mg_big = 0
@@ -19,16 +16,19 @@ MODULE commbuf_mod
 
     ! A 1-byte integer data buffer as a core for simplicity
     INTEGER(int8), ALLOCATABLE, TARGET :: buffer(:)
+    !$omp declare target(buffer)
 
     ! Various buffers that all point to the same core buffer
     REAL(realk), POINTER, CONTIGUOUS :: sendbuf(:) => NULL()
     REAL(realk), POINTER, CONTIGUOUS :: recvbuf(:) => NULL()
     REAL(realk), POINTER, CONTIGUOUS :: bigbuf(:) => NULL()
     INTEGER(intk), POINTER, CONTIGUOUS :: intbuf(:) => NULL()
+    !$omp declare target(sendbuf, recvbuf, bigbuf, intbuf)
 
     INTEGER(ifk), POINTER, CONTIGUOUS :: ifkbuf(:) => NULL()
     INTEGER(ifk), POINTER, CONTIGUOUS :: isendbuf(:) => NULL()
     INTEGER(ifk), POINTER, CONTIGUOUS :: irecvbuf(:) => NULL()
+    !$omp declare target(ifkbuf, isendbuf, irecvbuf)
 
     PUBLIC :: sendbuf, recvbuf, bigbuf, intbuf, &
         idim_mg_bufs, idim_mg_big, idim_mg_intbuf, &
@@ -38,27 +38,10 @@ MODULE commbuf_mod
 CONTAINS
     SUBROUTINE init_commbuf()
         ! Local variables
-        INTEGER(int64) :: commbuflen, bigbuflen
-
-        ! Max memory requirement for sendbuf/recvbuf in connect:
-        !   - One 2D slice of each grid (idim2d)
-        !   - 2 planes per face
-        !   - 6 faces
-        !   - times the maximum number of variables
-        ! This calculation overestimate the buffer if many levels
-        ! are used, since the idim2d variable include grids on all
-        ! levels, and connect only work on one level each time.
-        !
-        ! original formulation: 1.2*idim2d*2*6*maxnvars
-        ! only INT's: 1.2*2*6 = 14.4 round up to 15
-        commbuflen = 15*idim2d*maxnvars
-
-        ! Max memory requirement for bigbuf: All 3D fields at once,
-        ! rounded up to a number dividable by two
-        bigbuflen = idim3d + MOD(idim3d, 2) + 2
+        INTEGER(int64) :: bigbuflen
 
         ! All processes allocate the same buffer
-        bigbuflen = MAX(bigbuflen, 2*commbuflen)
+        bigbuflen = 6*idim3d
         CALL MPI_Allreduce(MPI_IN_PLACE, bigbuflen, 1, MPI_INTEGER8, &
             mpi_max, MPI_COMM_WORLD)
 
@@ -70,10 +53,16 @@ CONTAINS
         idim_mg_bufs = 0
         idim_mg_big = 0
         idim_mg_intbuf = 0
+        NULLIFY(ifkbuf)
+        NULLIFY(isendbuf)
+        NULLIFY(irecvbuf)
         NULLIFY(sendbuf)
         NULLIFY(recvbuf)
+        NULLIFY(bigbuf)
         NULLIFY(intbuf)
-        NULLIFY(recvbuf)
+        !$omp target update to(ifkbuf, isendbuf, irecvbuf, sendbuf, recvbuf, &
+        !$omp& bigbuf, intbuf)
+        !$omp target exit data map(delete: buffer)
         DEALLOCATE(buffer)
     END SUBROUTINE finish_commbuf
 
@@ -131,9 +120,11 @@ CONTAINS
         IF (ASSOCIATED(irecvbuf)) NULLIFY(irecvbuf)
 
         IF (ALLOCATED(buffer)) THEN
+            !$omp target exit data map(delete: buffer)
             DEALLOCATE(buffer)
         END IF
         ALLOCATE(buffer(corrlength))
+        !$omp target enter data map(always, to: buffer)
 
         idim_mg_big = corrlength/real_bytes
         idim_mg_bufs = idim_mg_big/2
@@ -141,15 +132,20 @@ CONTAINS
         cptr = C_LOC(buffer)
 
         CALL C_F_POINTER(cptr, bigbuf, [idim_mg_big])
+        !$omp target update to(bigbuf)
         sendbuf => bigbuf(1:idim_mg_bufs)
         recvbuf => bigbuf(idim_mg_bufs+1:2*idim_mg_bufs)
+        !$omp target update to(sendbuf, recvbuf)
 
         CALL C_F_POINTER(cptr, intbuf, [idim_mg_intbuf])
+        !$omp target update to(intbuf)
 
         ifklength = corrlength/ifk_bytes
         CALL C_F_POINTER(cptr, ifkbuf, [ifklength])
+        !$omp target update to(ifkbuf)
         isendbuf => ifkbuf(1:ifklength/2)
         irecvbuf => ifkbuf(ifklength/2+1:2*(ifklength/2))
+        !$omp target update to(isendbuf, irecvbuf)
     END SUBROUTINE allocate_buffer
 
 END MODULE commbuf_mod

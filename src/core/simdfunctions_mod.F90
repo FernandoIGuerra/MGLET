@@ -25,7 +25,10 @@ MODULE simdfunctions_mod
 CONTAINS
 
     PURE ELEMENTAL REAL(real32) FUNCTION divide00_sp(a, b, bp) RESULT(res)
-    !$omp declare simd(divide00_sp)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(divide00_sp)
+#endif
         REAL(real32), INTENT(in) :: a, b, bp
 
         IF (bp == 0.0_real32) THEN
@@ -36,7 +39,10 @@ CONTAINS
     END FUNCTION divide00_sp
 
     PURE ELEMENTAL REAL(real64) FUNCTION divide00_dp(a, b, bp) RESULT(res)
-    !$omp declare simd(divide00_dp)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(divide00_dp)
+#endif
         REAL(real64), INTENT(in) :: a, b, bp
 
         IF (bp == 0.0_real64) THEN
@@ -48,7 +54,10 @@ CONTAINS
 
 
     PURE ELEMENTAL REAL(real32) FUNCTION divide0_sp(a, b) RESULT(res)
-    !$omp declare simd(divide0_sp)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(divide0_sp)
+#endif
         REAL(real32), INTENT(in) :: a, b
 
         IF (b == 0.0_real32) THEN
@@ -59,7 +68,10 @@ CONTAINS
     END FUNCTION divide0_sp
 
     PURE ELEMENTAL REAL(real64) FUNCTION divide0_dp(a, b) RESULT(res)
-    !$omp declare simd(divide0_dp)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(divide0_dp)
+#endif
         REAL(real64), INTENT(in) :: a, b
 
         IF (b == 0.0_real64) THEN
@@ -71,7 +83,10 @@ CONTAINS
 
 
     PURE ELEMENTAL INTEGER(intk) FUNCTION l_to_i(l) RESULT(i)
-    !$omp declare simd(l_to_i)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(l_to_i)
+#endif
         LOGICAL, INTENT(in) :: l
 
         IF (l) THEN
@@ -83,7 +98,10 @@ CONTAINS
 
 
     PURE ELEMENTAL LOGICAL FUNCTION i_to_l(i) RESULT(l)
-    !$omp declare simd(i_to_l)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(i_to_l)
+#endif
         INTEGER(intk), INTENT(in) :: i
 
         IF (i == 0) THEN
@@ -95,14 +113,20 @@ CONTAINS
 
 
     PURE ELEMENTAL INTEGER(intk) FUNCTION lcm(a, b)
-    !$omp declare simd(lcm)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(lcm)
+#endif
         INTEGER(intk), INTENT(in) :: a, b
         lcm = a*b/gcd(a, b)
     END FUNCTION lcm
 
 
     PURE ELEMENTAL INTEGER(intk) FUNCTION gcd(a, b)
-    !$omp declare simd(gcd)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(gcd)
+#endif
         INTEGER(intk), INTENT(in) :: a, b
         INTEGER(intk) :: aa, bb, t
 
@@ -119,7 +143,10 @@ CONTAINS
 
 
     PURE ELEMENTAL REAL(real32) FUNCTION cube_root_sp(a)
-    !$omp declare simd(cube_root_sp)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(cube_root_sp)
+#endif
         REAL(real32), INTENT(in) :: a
 
         INTERFACE
@@ -136,7 +163,10 @@ CONTAINS
 
 
     PURE ELEMENTAL REAL(real64) FUNCTION cube_root_dp(a)
-    !$omp declare simd(cube_root_dp)
+        !$omp declare target
+#ifndef _MGLET_OFFLOAD_
+        !$omp declare simd(cube_root_dp)
+#endif
         REAL(real64), INTENT(in) :: a
 
         INTERFACE
@@ -153,6 +183,7 @@ CONTAINS
 
 
     PURE SUBROUTINE cross_sp(c, a, b)
+        !$omp declare target
         REAL(real32), INTENT(out) :: c(3)
         REAL(real32), INTENT(in) :: a(3), b(3)
 
@@ -163,6 +194,7 @@ CONTAINS
 
 
     PURE SUBROUTINE cross_dp(c, a, b)
+        !$omp declare target
         REAL(real64), INTENT(out) :: c(3)
         REAL(real64), INTENT(in) :: a(3), b(3)
 

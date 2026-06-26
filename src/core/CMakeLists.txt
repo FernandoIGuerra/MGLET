@@ -10,18 +10,20 @@ add_library(core STATIC
     corefields_mod.F90
     core_mod.F90
     create_directory.c
-    dlopen_mod.F90
     envvars_mod.F90
     err_mod.F90
     expression_mod.F90
     exprtk_wrapper.cxx
+    fieldhelper_mod.F90
     fieldio2_mod.F90
     field_t/basefield_mod.F90
     field_t/field_mod.F90
+    field_t/fieldmapper_mod.F90
     field_t/intfield_mod.F90
     field_t/realfield_mod.F90
     fields_mod.F90
     fort7_mod.F90
+    getrusage_wrapper.c
     gridio_mod.F90
     grids_mod.F90
     hdf5common_mod.F90
@@ -30,6 +32,7 @@ add_library(core STATIC
     plugins_mod.F90
     pointers_mod.F90
     precision_mod.F90
+    probeoffload_mod.F90
     pvtk.c
     pvtk_mod.F90
     qsort_mod.F90
@@ -58,6 +61,7 @@ target_link_libraries(core
     PRIVATE ${MPI_Fortran_LIBRARIES}
     PRIVATE ${HDF5_Fortran_LIBRARIES}
     PRIVATE ZLIB::ZLIB
+    PRIVATE $<$<BOOL:${MGLET_OFFLOAD}>:OpenMP::OpenMP_Fortran>
 )
 
 # Set include directories for specific files

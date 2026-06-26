@@ -5,13 +5,18 @@ MODULE pressuresolver_mod
     USE ib_mod
     USE itinfo_mod, ONLY: itinfo_sample
     USE plog_mod
+    USE laplacephi_mod
+    USE sip_hyperplane_mod, sipiter1_hp => sipiter1, sipiter2_hp => sipiter2
+    USE sip_classic_mod, sipiter1_cl => sipiter1, sipiter2_cl => sipiter2
+    USE sor_mod
 
     IMPLICIT NONE (type, external)
     PRIVATE
 
     ! Type of pressure solver
-    !   0 : Standard SIP
+    !   0 : Hyperplane SIP
     !   1 : SIP on coarsest level, then SOR on subsequent levels
+    !   2 : Classic SIP
     INTEGER(intk) :: ityp
 
     ! Number of inner iterations/sweeps in pressure solver
@@ -23,9 +28,6 @@ MODULE pressuresolver_mod
     ! Minimum number of outer iterations to always run independent of
     ! divergence
     INTEGER(intk) :: nouter_min
-
-    ! Relaxation factor for SOR
-    REAL(realk) :: omg
 
     ! Convergence threshold
     REAL(realk) :: epcorr = 0.0
@@ -41,9 +43,6 @@ MODULE pressuresolver_mod
 
     ! A-versions: simple versions not considering the BP field
     ! B-versions: IB versions using the BP field
-    INTERFACE sipiter1
-        MODULE PROCEDURE :: sipiter1_A, sipiter1_B
-    END INTERFACE sipiter1
 
     INTERFACE pressureftocone
         MODULE PROCEDURE :: pressureftocone_A, pressureftocone_B
@@ -64,6 +63,7 @@ MODULE pressuresolver_mod
     PUBLIC :: init_pressuresolver, finish_pressuresolver, mgpoisl
 
 CONTAINS
+
     SUBROUTINE init_pressuresolver()
         ! Subroutine arguments
         ! none...
@@ -71,6 +71,7 @@ CONTAINS
         ! Local variables
         TYPE(config_t) :: psolveconf
         CHARACTER(len=16) :: type
+        REAL(realk) :: omg
 
         ! Required values
         CALL fort7%get(psolveconf, "/flow/pressuresolver")
@@ -118,13 +119,31 @@ CONTAINS
             ityp = 0
         CASE ("sor")
             ityp = 1
+        CASE("classic")
+            ityp = 2
         CASE DEFAULT
             WRITE(*, '("Invalid pressure solver type: ", A)') type
             CALL errr(__FILE__, __LINE__)
         END SELECT
 
-        ! Always intialize SIP - it's always used at the coarsest level
-        CALL init_sip()
+        ! Always initialize SIP - it's always used at the coarsest level
+        CALL set_field("SIPLW")
+        CALL set_field("SIPLS")
+        CALL set_field("SIPLB")
+        CALL set_field("SIPUE")
+        CALL set_field("SIPUN")
+        CALL set_field("SIPUT")
+        CALL set_field("SIPLPR")
+
+
+        IF (ityp == 2) THEN
+            ! Using the classic SIP solver
+            CALL sip_classic_init()
+
+        ELSE
+            ! Using the hyperplane solver
+            CALL sip_hyperplane_init()
+        END IF
 
         ! Initialize SOR if enabled
         IF (ityp == 1) THEN
@@ -134,158 +153,22 @@ CONTAINS
                 CALL errr(__FILE__, __LINE__)
             END IF
 
-            CALL init_sor()
+            CALL sor_init(omg)
         END IF
+
     END SUBROUTINE init_pressuresolver
 
 
     SUBROUTINE finish_pressuresolver()
         CALL finish_plog()
+
+        IF (ityp == 2) THEN
+            CALL sip_classic_finish()
+        ELSE
+            CALL sip_hyperplane_finish()
+        END IF
+
     END SUBROUTINE finish_pressuresolver
-
-
-    SUBROUTINE init_sip()
-        ! Subroutine arguments
-        ! none...
-
-        ! Local variables
-        INTEGER(intk) :: igr, igrid
-        INTEGER(intk) :: k, j, i
-        INTEGER(intk) :: kk, jj, ii
-        REAL(realk), PARAMETER :: alfa = 0.92
-        REAL(realk) :: p1, p2, p3
-        REAL(realk), POINTER, CONTIGUOUS :: bp(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: lb(:, :, :), lw(:, :, :), &
-            ls(:, :, :), ue(:, :, :), un(:, :, :), ut(:, :, :), lpr(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: ae(:),  aw(:),  an(:), as(:), &
-            at(:), ab(:), ap(:, :, :)
-
-        CALL set_field("SIPLW")
-        CALL set_field("SIPLS")
-        CALL set_field("SIPLB")
-        CALL set_field("SIPUE")
-        CALL set_field("SIPUN")
-        CALL set_field("SIPUT")
-        CALL set_field("SIPLPR")
-
-        DO igr = 1, nmygrids
-            igrid = mygrids(igr)
-
-            CALL get_mgdims(kk, jj, ii, igrid)
-
-            CALL get_fieldptr(lw, "SIPLW", igrid)
-            CALL get_fieldptr(ls, "SIPLS", igrid)
-            CALL get_fieldptr(lb, "SIPLB", igrid)
-            CALL get_fieldptr(ue, "SIPUE", igrid)
-            CALL get_fieldptr(un, "SIPUN", igrid)
-            CALL get_fieldptr(ut, "SIPUT", igrid)
-            CALL get_fieldptr(lpr, "SIPLPR", igrid)
-
-            CALL get_fieldptr(aw, "GSAW", igrid)
-            CALL get_fieldptr(ae, "GSAE", igrid)
-            CALL get_fieldptr(as, "GSAS", igrid)
-            CALL get_fieldptr(an, "GSAN", igrid)
-            CALL get_fieldptr(ab, "GSAB", igrid)
-            CALL get_fieldptr(at, "GSAT", igrid)
-
-            CALL get_fieldptr(ap, "GSAP", igrid)
-
-            CALL get_fieldptr(bp, "BP", igrid)
-
-            DO i = 3, ii-2
-                DO j = 3, jj-2
-                    DO k = 3, kk-2
-                        lw(k, j, i) = aw(i)*bu(k, j, i-1) &
-                            /(1.0 + alfa*(un(k, j, i-1) + ut(k, j, i-1)))
-
-                        ls(k, j, i) = as(j)*bv(k, j-1, i) &
-                            /(1.0 + alfa*(ue(k, j-1, i) + ut(k, j-1, i)))
-
-                        lb(k, j, i) = ab(k)*bw(k-1, j, i) &
-                            /(1.0 + alfa*(un(k-1, j, i) + ue(k-1, j, i)))
-
-                        p1 = alfa*(lb(k, j, i)*ue(k-1, j, i) &
-                            + ls(k, j, i)*ue(k, j-1, i))
-                        p2 = alfa*(lb(k, j, i)*un(k-1, j, i) &
-                            + lw(k, j, i)*un(k, j, i-1))
-                        p3 = alfa*(lw(k, j, i)*ut(k, j, i-1) &
-                            + ls(k, j, i)*ut(k, j-1, i))
-
-                        lpr(k, j, i) = 1.0/(ap(k, j, i) + p1 + p2 + p3 &
-                            - lb(k, j, i)*ut(k-1, j, i) &
-                            - lw(k, j, i)*ue(k, j, i-1) &
-                            - ls(k, j, i)*un(k, j-1, i) &
-                            + 1.0e-20)
-
-                        ue(k, j, i) = (ae(i)*bu(k, j, i) - p1)*lpr(k, j, i)
-                        un(k, j, i) = (an(j)*bv(k, j, i) - p2)*lpr(k, j, i)
-                        ut(k, j, i) = (at(k)*bw(k, j, i) - p3)*lpr(k, j, i)
-                    END DO
-                END DO
-            END DO
-
-            DO i = 3, ii-2
-                DO j = 3, jj-2
-                    DO k = 3, kk-2
-                        lw(k, j, i) = lw(k, j, i)*lpr(k, j, i)
-                    END DO
-                    DO k = 3, kk-2
-                        ls(k, j, i) = ls(k, j, i)*lpr(k, j, i)
-                    END DO
-                    DO k = 3, kk-2
-                        lb(k, j, i) = lb(k, j, i)*lpr(k, j, i)
-                    END DO
-                END DO
-            END DO
-        END DO
-
-    CONTAINS
-        ! These routines are not protected against out-of-bounds and not valid
-        ! for the edges ii, jj, kk - but in the scope above that is OK
-        PURE REAL(realk) FUNCTION bu(k, j, i)
-            INTEGER(intk), INTENT(in) :: k, j, i
-            bu = bp(k, j, i)*bp(k, j, i+1)
-        END FUNCTION bu
-
-        PURE REAL(realk) FUNCTION bv(k, j, i)
-            INTEGER(intk), INTENT(in) :: k, j, i
-            bv = bp(k, j, i)*bp(k, j+1, i)
-        END FUNCTION bv
-
-        PURE REAL(realk) FUNCTION bw(k, j, i)
-            INTEGER(intk), INTENT(in) :: k, j, i
-            bw = bp(k, j, i)*bp(k+1, j, i)
-        END FUNCTION bw
-    END SUBROUTINE init_sip
-
-
-    SUBROUTINE init_sor()
-        ! Subroutine arguments
-        ! none...
-
-        ! Local variables
-        INTEGER(intk) :: igr, igrid
-        INTEGER(intk) :: k, j, i
-        INTEGER(intk) :: kk, jj, ii
-        REAL(realk), POINTER, CONTIGUOUS :: ap(:, :, :), rap(:, :, :)
-
-        CALL set_field("SOR_RAP")
-
-        DO igr = 1, nmygrids
-            igrid = mygrids(igr)
-
-            CALL get_mgdims(kk, jj, ii, igrid)
-            CALL get_fieldptr(rap, "SOR_RAP", igrid)
-            CALL get_fieldptr(ap, "GSAP", igrid)
-            DO i = 3, ii-2
-                DO j = 3, jj-2
-                    DO k = 3, kk-2
-                        rap(k, j, i) = divide0(1.0_realk, ap(k, j, i))
-                    END DO
-                END DO
-            END DO
-        END DO
-    END SUBROUTINE init_sor
 
 
     SUBROUTINE mgpoisl(u, v, w, p, dt, ittot, irk)
@@ -330,7 +213,7 @@ CONTAINS
         CALL ib%divcal(rhs, u, v, w, prefak)
 
         DO ilevel = maxlevel, minlevel, -1
-            CALL ftoc(ilevel, rhs%arr, rhs%arr, 'R')
+            CALL ftoc(ilevel, rhs, rhs, 'R')
         END DO
 
         ! For debug logging
@@ -369,7 +252,7 @@ CONTAINS
             ! vom feinsten zum groebsten (fine to coarse)
             ! hilf = 0.0
             DO ilevel = maxlevel, minlevel, -1
-                CALL ftoc(ilevel, hilf%arr, hilf%arr, 'P')
+                CALL ftoc(ilevel, hilf, hilf, 'P')
             END DO
 
             ! --- intermediate state ---
@@ -387,8 +270,8 @@ CONTAINS
             ! rhs <- rhs + res
             CALL rescal(rhs, res)
 
-            DO ilevel = maxlevel, minlevel, -1
-                CALL ftoc(ilevel, rhs%arr, rhs%arr, 'R')
+            DO ilevel = maxlevel, minlevel+1, -1
+                CALL ftoc(ilevel, rhs, rhs, 'R')
             END DO
 
             ! Max of RHS scaled according to levels
@@ -449,10 +332,7 @@ CONTAINS
         ! Velocity fields are modified and become solenoidal based on DP
         CALL mgpcorr(u, v, w, p, dp, dt/rho, bp)
         DO ilevel = maxlevel, minlevel, -1
-            CALL ftoc(ilevel, u%arr, u%arr, 'U')
-            CALL ftoc(ilevel, v%arr, v%arr, 'V')
-            CALL ftoc(ilevel, w%arr, w%arr, 'W')
-            CALL ftoc(ilevel, p%arr, p%arr, 'P')
+            CALL ftoc(ilevel, u, v, w, p)
         END DO
 
         ! All levels (coarse to fine)
@@ -507,6 +387,8 @@ CONTAINS
             CALL get_field(gsrap, "SOR_RAP")
         END IF
 
+        ! Getting the adapted coefficients for SIP
+        ! (same fields used for both classic and hyperplane SIP)
         CALL get_field(siplw, "SIPLW")
         CALL get_field(sipls, "SIPLS")
         CALL get_field(siplb, "SIPLB")
@@ -563,6 +445,7 @@ CONTAINS
             lpr(:, :, :)
         REAL(realk), POINTER, CONTIGUOUS :: dp_p(:, :, :), res_p(:, :, :), &
             rhs_p(:, :, :)
+        INTEGER(ifk), CONTIGUOUS, POINTER :: mip_ptr(:), idx_ptr(:)
 
         CALL laplacephi_level(ilevel, res, dp, bp)
 
@@ -578,7 +461,14 @@ CONTAINS
             CALL siplb%get_ptr(lb, igrid)
             CALL siplpr%get_ptr(lpr, igrid)
 
-            CALL sipiter1(kk, jj, ii, rhs_p, res_p, lw, ls, lb, lpr)
+            IF (ityp == 2) THEN
+                CALL sipiter1_cl(kk, jj, ii, rhs_p, res_p, lw, ls, lb, lpr)
+            ELSE
+                CALL get_grid3_ifk_linear(mip_ptr, mip_hp_f, igrid)
+                CALL get_grid3_ifk_linear(idx_ptr, idx_hp_f, igrid)
+                CALL sipiter1_hp(kk, jj, ii, rhs_p, res_p, lw, ls, lb, lpr, &
+                    mip_ptr, idx_ptr)
+            END IF
         END DO
 
         IF (iloop < ninner) THEN
@@ -598,378 +488,16 @@ CONTAINS
             CALL sipun%get_ptr(un, igrid)
             CALL siput%get_ptr(ut, igrid)
 
-            CALL sipiter2(kk, jj, ii, dp_p, res_p, ue, un, ut)
+            IF (ityp == 2) THEN
+                CALL sipiter2_cl(kk, jj, ii, dp_p, res_p, ue, un, ut)
+            ELSE
+                CALL get_grid3_ifk_linear(mip_ptr, mip_hp_f, igrid)
+                CALL get_grid3_ifk_linear(idx_ptr, idx_hp_f, igrid)
+                CALL sipiter2_hp(kk, jj, ii, dp_p, res_p, ue, un, ut, &
+                    mip_ptr, idx_ptr)
+            END IF
         END DO
     END SUBROUTINE sip
-
-
-    SUBROUTINE sor(ilevel, dp, rhs, gsaw, gsae, gsas, gsan, gsab, gsat, &
-            gsrap, bp)
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in) :: ilevel
-        TYPE(field_t), INTENT(inout) :: dp
-        TYPE(field_t), INTENT(in) :: rhs
-        TYPE(field_t), INTENT(in) :: gsaw
-        TYPE(field_t), INTENT(in) :: gsae
-        TYPE(field_t), INTENT(in) :: gsas
-        TYPE(field_t), INTENT(in) :: gsan
-        TYPE(field_t), INTENT(in) :: gsab
-        TYPE(field_t), INTENT(in) :: gsat
-        TYPE(field_t), INTENT(in) :: gsrap
-        TYPE(field_t), INTENT(in), OPTIONAL :: bp
-
-        ! Local variables
-        INTEGER(intk) :: i, igrid
-        INTEGER(intk) :: kk, jj, ii
-        REAL(realk), POINTER, CONTIGUOUS :: aw(:), ae(:), as(:), an(:), &
-            ab(:), at(:), rap(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: dp_p(:, :, :), &
-            rhs_p(:, :, :), bp_p(:, :, :)
-
-        ! Ensure this does not point to anything
-        NULLIFY(bp_p)
-
-        DO i = 1, nmygridslvl(ilevel)
-            igrid = mygridslvl(i, ilevel)
-
-            CALL dp%get_ptr(dp_p, igrid)
-            CALL rhs%get_ptr(rhs_p, igrid)
-
-            CALL gsaw%get_ptr(aw, igrid)
-            CALL gsae%get_ptr(ae, igrid)
-            CALL gsas%get_ptr(as, igrid)
-            CALL gsan%get_ptr(an, igrid)
-            CALL gsab%get_ptr(ab, igrid)
-            CALL gsat%get_ptr(at, igrid)
-            CALL gsrap%get_ptr(rap, igrid)
-
-            IF (PRESENT(bp)) CALL bp%get_ptr(bp_p, igrid)
-
-            CALL get_mgdims(kk, jj, ii, igrid)
-            CALL relax(kk, jj, ii, dp_p, rhs_p, aw, ae, as, an, &
-                ab, at, rap, bp_p)
-        END DO
-    END SUBROUTINE sor
-
-
-    SUBROUTINE laplacephi(res, phi, bp)
-        ! Subroutine arguments
-        TYPE(field_t), INTENT(inout) :: res
-        TYPE(field_t), INTENT(in) :: phi
-        TYPE(field_t), INTENT(in), OPTIONAL :: bp
-
-        ! Local variables
-        INTEGER(intk) :: ilevel
-
-        DO ilevel = minlevel, maxlevel
-            CALL laplacephi_level(ilevel, res, phi, bp)
-        END DO
-    END SUBROUTINE laplacephi
-
-
-    SUBROUTINE laplacephi_level(ilevel, res_f, phi_f, bp_f)
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in):: ilevel
-        TYPE(field_t), INTENT(inout) :: res_f
-        TYPE(field_t), INTENT(in) :: phi_f
-        TYPE(field_t), INTENT(in), OPTIONAL :: bp_f
-
-        ! Local variables
-        INTEGER(intk) :: i, igrid
-        INTEGER(intk) :: kk, jj, ii
-
-        TYPE(field_t), POINTER :: gsaw, gsae, gsas, gsan, gsab, gsat, gsap
-        REAL(realk), POINTER, CONTIGUOUS :: phi(:, :, :), res(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: aw(:), ae(:), as(:), an(:), &
-            ab(:), at(:), ap(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: bp(:, :, :)
-
-        NULLIFY(bp)
-
-        CALL get_field(gsaw, "GSAW")
-        CALL get_field(gsae, "GSAE")
-        CALL get_field(gsas, "GSAS")
-        CALL get_field(gsan, "GSAN")
-        CALL get_field(gsab, "GSAB")
-        CALL get_field(gsat, "GSAT")
-        CALL get_field(gsap, "GSAP")
-
-        DO i = 1, nmygridslvl(ilevel)
-            igrid = mygridslvl(i, ilevel)
-            CALL get_mgdims(kk, jj, ii, igrid)
-
-            CALL phi_f%get_ptr(phi, igrid)
-            CALL res_f%get_ptr(res, igrid)
-
-            CALL gsaw%get_ptr(aw, igrid)
-            CALL gsae%get_ptr(ae, igrid)
-            CALL gsas%get_ptr(as, igrid)
-            CALL gsan%get_ptr(an, igrid)
-            CALL gsab%get_ptr(ab, igrid)
-            CALL gsat%get_ptr(at, igrid)
-            CALL gsap%get_ptr(ap, igrid)
-
-            IF (PRESENT(bp_f)) THEN
-                CALL bp_f%get_ptr(bp, igrid)
-            END IF
-
-            CALL laplacephi_grid(kk, jj, ii, res, phi, aw, ae, an, as, &
-                at, ab, ap, bp)
-        END DO
-    END SUBROUTINE laplacephi_level
-
-
-    PURE SUBROUTINE laplacephi_grid(kk, jj, ii, res, phi, aw, ae, an, as, &
-            at, ab, ap, bp)
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in) :: kk, jj, ii
-        REAL(realk), INTENT(inout) :: res(kk, jj, ii)
-        REAL(realk), INTENT(in) :: phi(kk, jj, ii)
-        REAL(realk), INTENT(in) :: aw(ii), ae(ii), an(jj), as(jj), &
-            at(kk), ab(kk)
-        REAL(realk), INTENT(in) :: ap(kk, jj, ii)
-        REAL(realk), INTENT(in), OPTIONAL :: bp(kk, jj, ii)
-
-        ! Local variables
-        INTEGER :: k, j, i
-
-        IF (PRESENT(bp)) THEN
-            DO i = 3, ii-2
-                DO j = 3, jj-2
-                    DO k = 3, kk-2
-                        res(k, j, i) = &
-                            - aw(i)*phi(k, j, i-1)*bp(k, j, i-1)*bp(k, j, i) &
-                            - ae(i)*phi(k, j, i+1)*bp(k, j, i)*bp(k, j, i+1) &
-                            - as(j)*phi(k, j-1, i)*bp(k, j-1, i)*bp(k, j, i) &
-                            - an(j)*phi(k, j+1, i)*bp(k, j, i)*bp(k, j+1, i) &
-                            - ab(k)*phi(k-1, j, i)*bp(k-1, j, i)*bp(k, j, i) &
-                            - at(k)*phi(k+1, j, i)*bp(k, j, i)*bp(k+1, j, i) &
-                            - ap(k, j, i)*phi(k, j, i)
-                    END DO
-                END DO
-            END DO
-        ELSE
-            DO i = 3, ii-2
-                DO j = 3, jj-2
-                    DO k = 3, kk-2
-                        res(k, j, i) = &
-                            - aw(i) * phi(k, j, i-1) &
-                            - ae(i) * phi(k, j, i+1) &
-                            - as(j) * phi(k, j-1, i) &
-                            - an(j) * phi(k, j+1, i) &
-                            - ab(k) * phi(k-1, j, i) &
-                            - at(k) * phi(k+1, j, i) &
-                            - ap(k, j, i) * phi(k, j, i)
-                    END DO
-                END DO
-            END DO
-        END IF
-    END SUBROUTINE laplacephi_grid
-
-
-    PURE SUBROUTINE sipiter0(kk, jj, ii, rhs, res, lpr)
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in) :: kk, jj, ii
-        REAL(realk), INTENT(in) :: rhs(kk, jj, ii)
-        REAL(realk), INTENT(inout) :: res(kk, jj, ii)
-        REAL(realk), INTENT(in) :: lpr(kk, jj, ii)
-
-        ! Local variables
-        INTEGER(intk) :: k, j, i
-
-        DO i = 3, ii-2
-            DO j = 3, jj-2
-                DO k = 3, kk-2
-                    res(k, j, i) = (rhs(k, j, i) + res(k, j, i))*lpr(k, j, i)
-                END DO
-            END DO
-        END DO
-    END SUBROUTINE sipiter0
-
-
-    PURE SUBROUTINE sipiter1_A(kk, jj, ii, rhs, res, lw, ls, lb)
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in) :: kk, jj, ii
-        REAL(realk), INTENT(inout) :: res(kk, jj, ii)
-        REAL(realk), INTENT(in) :: rhs(kk, jj, ii)
-        REAL(realk), INTENT(in) :: lw(kk, jj, ii), ls(kk, jj, ii), &
-            lb(kk, jj, ii)
-
-        ! Local variables
-        INTEGER(intk) :: k, j, i
-
-        DO i = 3, ii-2
-            DO j = 3, jj-2
-                DO k = 3, kk-2
-                    res(k, j, i) = res(k, j, i) - lw(k, j, i)*res(k, j, i-1) &
-                        - ls(k, j, i)*res(k, j-1, i)
-                END DO
-                DO k = 3, kk-2
-                    res(k, j, i) = res(k, j, i) - lb(k, j, i)*res(k-1, j, i)
-                END DO
-            END DO
-        END DO
-    END SUBROUTINE sipiter1_A
-
-
-    PURE SUBROUTINE sipiter1_B(kk, jj, ii, rhs, res, lw, ls, lb, lpr)
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in) :: kk, jj, ii
-        REAL(realk), INTENT(inout) :: res(kk, jj, ii)
-        REAL(realk), INTENT(in) :: rhs(kk, jj, ii)
-        REAL(realk), INTENT(in) :: lw(kk, jj, ii), ls(kk, jj, ii), &
-            lb(kk, jj, ii), lpr(kk, jj, ii)
-
-        ! Local variables
-        INTEGER(intk) :: k, j, i
-
-        DO i = 3, ii-2
-            DO j = 3, jj-2
-                DO k = 3, kk-2
-                    res(k, j, i) = (rhs(k, j, i) + res(k, j, i))*lpr(k, j, i)
-                    res(k, j, i) = res(k, j, i) - lw(k, j, i)*res(k, j, i-1) &
-                        - ls(k, j, i)*res(k, j-1, i)
-                END DO
-                DO k = 3, kk-2
-                    res(k, j, i) = res(k, j, i) - lb(k, j, i)*res(k-1, j, i)
-                END DO
-            END DO
-        END DO
-    END SUBROUTINE sipiter1_B
-
-
-    PURE SUBROUTINE sipiter2(kk, jj, ii, phi, res, ue, un, ut)
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in) :: kk, jj, ii
-        REAL(realk), INTENT(inout) :: phi(kk, jj, ii), res(kk, jj, ii)
-        REAL(realk), INTENT(in) :: ue(kk, jj, ii), un(kk, jj, ii), &
-            ut(kk, jj, ii)
-
-        ! Local variables
-        INTEGER(intk) :: k, j, i
-
-        DO i = ii-2, 3, -1
-            DO j = jj-2, 3, -1
-                DO k = 3, kk-2
-                    res(k, j, i) = res(k, j, i) - un(k, j, i)*res(k, j+1, i) &
-                        - ue(k, j, i)*res(k, j, i+1)
-                END DO
-                DO k = kk-2, 3, -1
-                    res(k, j, i) = res(k, j, i) - ut(k, j, i)*res(k+1, j, i)
-                END DO
-            END DO
-        END DO
-
-        DO i = 3, ii-2
-            DO j = 3, jj-2
-                DO k = 3, kk-2
-                    phi(k, j, i) = phi(k, j, i) + res(k, j, i)
-                END DO
-            END DO
-        END DO
-    END SUBROUTINE sipiter2
-
-
-    PURE SUBROUTINE relax(kk, jj, ii, dp, rhs, gsaw, gsae, gsas, gsan, &
-            gsab, gsat, gsrap, bp)
-
-        ! Subroutine arguments
-        INTEGER(intk), INTENT(in) :: kk, jj, ii
-        REAL(realk), INTENT(inout) :: dp(kk, jj, ii)
-        REAL(realk), INTENT(in) :: rhs(kk, jj, ii)
-        REAL(realk), INTENT(in) :: gsaw(ii), gsae(ii), gsas(jj), gsan(jj), &
-            gsab(kk), gsat(kk)
-        REAL(realk), INTENT(in) :: gsrap(kk, jj, ii)
-        REAL(realk), INTENT(in), OPTIONAL :: bp(kk, jj, ii)
-
-        ! Local variables
-        INTEGER(intk) :: i, j, k, rb
-        INTEGER(intk) :: kstart, kstop
-        REAL(realk) :: res
-        REAL(realk) :: aw, ae, as, an, ab, at, rap
-
-        IF (PRESENT(bp)) THEN
-            DO rb = 0, 1
-                DO i = 3, ii-2
-                    DO j = 3, jj-2
-                        IF (MOD(i + j, 2) == rb) THEN
-                            kstart = 4
-                            kstop = kk - 2
-                        ELSE IF (MOD(i + j, 2) /= rb) THEN
-                            kstart = 3
-                            kstop = kk - 3
-                        END IF
-
-                        !$omp simd private(aw, ae, as, an, ab, at, rap, res)
-                        DO k = kstart, kstop, 2
-                            ! Variations in numerical formulation, please
-                            ! keep for future reference. Should be the same
-                            ! numerics, but performance vary.
-                            !
-                            ! aw = bu(k, j, i-1)/(dx(i-1)*dx(i))
-                            ! ae = bu(k, j, i  )/(dx(i  )*dx(i))
-                            ! as = bv(k, j-1, i)/(dy(j-1)*dy(j))
-                            ! an = bv(k, j  , i)/(dy(j  )*dy(j))
-                            ! ab = bw(k-1, j, i)/(dz(k-1)*dz(k))
-                            ! at = bw(k  , j, i)/(dz(k  )*dz(k))
-                            !
-                            ! aw = bp(k, j, i-1)*bp(k, j, i  )/(dx(i-1)*dx(i))
-                            ! ae = bp(k, j, i  )*bp(k, j, i+1)/(dx(i  )*dx(i))
-                            ! as = bp(k, j-1, i)*bp(k, j  , i)/(dy(j-1)*dy(j))
-                            ! an = bp(k, j  , i)*bp(k, j+1, i)/(dy(j  )*dy(j))
-                            ! ab = bp(k-1, j, i)*bp(k  , j, i)/(dz(k-1)*dz(k))
-                            ! at = bp(k  , j, i)*bp(k+1, j, i)/(dz(k  )*dz(k))
-
-                            aw = bp(k, j, i-1)*bp(k, j, i)*gsaw(i)
-                            ae = bp(k, j, i)*bp(k, j, i+1)*gsae(i)
-                            as = bp(k, j-1, i)*bp(k, j, i)*gsas(j)
-                            an = bp(k, j, i)*bp(k, j+1, i)*gsan(j)
-                            ab = bp(k-1, j, i)*bp(k, j, i)*gsab(k)
-                            at = bp(k, j, i)*bp(k+1, j, i)*gsat(k)
-                            rap = gsrap(k, j, i)
-
-                            res = (aw * dp(k, j, i-1) &
-                                + ae * dp(k, j, i+1) &
-                                + as * dp(k, j-1, i) &
-                                + an * dp(k, j+1, i) &
-                                + ab * dp(k-1, j, i) &
-                                + at * dp(k+1, j, i) &
-                                - rhs(k, j, i)) * rap
-
-                            dp(k, j, i) = (1.0 - omg)*dp(k, j, i) - omg*res
-                        END DO
-                    END DO
-                END DO
-            END DO
-        ELSE
-            DO rb = 0, 1
-                DO i = 3, ii-2
-                    DO j = 3, jj-2
-                        IF (MOD(i + j, 2) == rb) THEN
-                            kstart = 4
-                            kstop = kk - 2
-                        ELSE IF (MOD(i + j, 2) /= rb) THEN
-                            kstart = 3
-                            kstop = kk - 3
-                        END IF
-
-                        !$omp simd private(res)
-                        DO k = kstart, kstop, 2
-                            res = (gsaw(i) * dp(k, j, i-1) &
-                                  + gsae(i) * dp(k, j, i+1) &
-                                  + gsas(j) * dp(k, j-1, i) &
-                                  + gsan(j) * dp(k, j+1, i) &
-                                  + gsab(k) * dp(k-1, j, i) &
-                                  + gsat(k) * dp(k+1, j, i) &
-                                  - rhs(k, j, i)) * gsrap(k, j, i)
-
-                            dp(k, j, i) = (1.0 - omg)*dp(k, j, i) - omg*res
-                        END DO
-                    END DO
-                END DO
-            END DO
-        END IF
-    END SUBROUTINE relax
 
 
     SUBROUTINE bfront(igrid, iface, ibocd, ctyp, f1, f2, f3, f4, timeph)
@@ -987,7 +515,7 @@ CONTAINS
         REAL(realk) :: pcnew, bpc, fak
         REAL(realk) :: sb11, sb12, sb13, sb14
         REAL(realk), POINTER, CONTIGUOUS :: p(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: pbuffer(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: pbuffer(:, :)
         REAL(realk), POINTER, CONTIGUOUS :: bp(:, :, :)
         REAL(realk), POINTER, CONTIGUOUS :: dx(:), dy(:), dz(:)
         REAL(realk), POINTER, CONTIGUOUS :: ddx(:), ddy(:), ddz(:)
@@ -996,7 +524,7 @@ CONTAINS
         IF (ctyp /= 'PAR') RETURN
 
         CALL f1%get_ptr(p, igrid)
-        CALL f1%buffers%get_buffer(pbuffer, igrid, iface)
+        CALL f1%get_buffer(pbuffer, igrid, iface)
         CALL get_mgdims(kk, jj, ii, igrid)
 
         CALL get_fieldptr(dx, "DX", igrid)
@@ -1031,7 +559,7 @@ CONTAINS
                 DO k = 3, kk-2, 2
                     CALL pressureftocone(k, j, i, kk, jj, ii, p, bp, &
                         ddx, ddy, ddz, pcnew, bpc)
-                    IF (bpc < 0.5) pcnew = pbuffer(k, j, 1)
+                    IF (bpc < 0.5) pcnew = pbuffer(k, j)
 
                     sb11 = bp(k, j, i2)*bp(k, j, i3)
                     sb12 = bp(k, j+1, i2)*bp(k, j+1, i3)
@@ -1048,7 +576,7 @@ CONTAINS
                         DO n = 0, 1
                             p(k+n, j+m, i2) = p(k+n, j+m, i3) &
                                 + fak*dx(istag2)/(ddx(i3)+ddx(i2)) &
-                                *(pbuffer(k, j, 1) - pcnew)
+                                *(pbuffer(k, j) - pcnew)
                         END DO
                     END DO
                 END DO
@@ -1062,7 +590,7 @@ CONTAINS
                         DO n = 0, 1
                             p(k+n, j+m, i2) = p(k+n, j+m, i3) &
                                 + dx(istag2)/(ddx(i3)+ddx(i2)) &
-                                *(pbuffer(k, j, 1) - pcnew)
+                                *(pbuffer(k, j) - pcnew)
                         END DO
                     END DO
                 END DO
@@ -1086,7 +614,7 @@ CONTAINS
         REAL(realk) :: pcnew, bpc, fak
         REAL(realk) :: sb11, sb12, sb13, sb14
         REAL(realk), POINTER, CONTIGUOUS :: p(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: pbuffer(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: pbuffer(:, :)
         REAL(realk), POINTER, CONTIGUOUS :: bp(:, :, :)
         REAL(realk), POINTER, CONTIGUOUS :: dx(:), dy(:), dz(:)
         REAL(realk), POINTER, CONTIGUOUS :: ddx(:), ddy(:), ddz(:)
@@ -1095,7 +623,7 @@ CONTAINS
         IF (ctyp /= 'PAR') RETURN
 
         CALL f1%get_ptr(p, igrid)
-        CALL f1%buffers%get_buffer(pbuffer, igrid, iface)
+        CALL f1%get_buffer(pbuffer, igrid, iface)
         CALL get_mgdims(kk, jj, ii, igrid)
 
         CALL get_fieldptr(dx, "DX", igrid)
@@ -1130,7 +658,7 @@ CONTAINS
                 DO k = 3, kk-2, 2
                     CALL pressureftocone(k, j, i, kk, jj, ii, p, bp, &
                         ddx, ddy, ddz, pcnew, bpc)
-                    IF (bpc < 0.5) pcnew = pbuffer(k, i, 1)
+                    IF (bpc < 0.5) pcnew = pbuffer(k, i)
 
                     sb11 = bp(k, j2, i)*bp(k, j3, i)
                     sb12 = bp(k, j2, i+1)*bp(k, j3, i+1)
@@ -1147,7 +675,7 @@ CONTAINS
                         DO n = 0, 1
                             p(k+n, j2, i+l) = p(k+n, j3, i+l) &
                                 + fak*dy(jstag2)/(ddy(j3)+ddy(j2)) &
-                                *(pbuffer(k, i, 1) - pcnew)
+                                *(pbuffer(k, i) - pcnew)
                         END DO
                     END DO
                 END DO
@@ -1161,7 +689,7 @@ CONTAINS
                         DO n = 0, 1
                             p(k+n, j2, i+l) = p(k+n, j3, i+l) &
                                 + dy(jstag2)/(ddy(j3)+ddy(j2)) &
-                                *(pbuffer(k, i, 1) - pcnew)
+                                *(pbuffer(k, i) - pcnew)
                         END DO
                     END DO
                 END DO
@@ -1185,7 +713,7 @@ CONTAINS
         REAL(realk) :: pcnew, bpc, fak
         REAL(realk) :: sb11, sb12, sb13, sb14
         REAL(realk), POINTER, CONTIGUOUS :: p(:, :, :)
-        REAL(realk), POINTER, CONTIGUOUS :: pbuffer(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: pbuffer(:, :)
         REAL(realk), POINTER, CONTIGUOUS :: bp(:, :, :)
         REAL(realk), POINTER, CONTIGUOUS :: dx(:), dy(:), dz(:)
         REAL(realk), POINTER, CONTIGUOUS :: ddx(:), ddy(:), ddz(:)
@@ -1194,7 +722,7 @@ CONTAINS
         IF (ctyp /= 'PAR') RETURN
 
         CALL f1%get_ptr(p, igrid)
-        CALL f1%buffers%get_buffer(pbuffer, igrid, iface)
+        CALL f1%get_buffer(pbuffer, igrid, iface)
         CALL get_mgdims(kk, jj, ii, igrid)
 
         CALL get_fieldptr(dx, "DX", igrid)
@@ -1229,7 +757,7 @@ CONTAINS
                 DO j = 3, jj-2, 2
                     CALL pressureftocone(k, j, i, kk, jj, ii, p, bp, &
                         ddx, ddy, ddz, pcnew, bpc)
-                    IF (bpc < 0.5) pcnew = pbuffer(j, i, 1)
+                    IF (bpc < 0.5) pcnew = pbuffer(j, i)
 
                     sb11 = bp(k2, j, i)*bp(k3, j, i)
                     sb12 = bp(k2, j, i+1)*bp(k3, j, i+1)
@@ -1246,7 +774,7 @@ CONTAINS
                         DO m = 0, 1
                             p(k2, j+m, i+l) = p(k3, j+m, i+l) &
                                 + fak*dz(kstag2)/(ddz(k3)+ddz(k2)) &
-                                *(pbuffer(j, i, 1) - pcnew)
+                                *(pbuffer(j, i) - pcnew)
                         END DO
                     END DO
                 END DO
@@ -1260,7 +788,7 @@ CONTAINS
                         DO m = 0, 1
                             p(k2, j+m, i+l) = p(k3, j+m, i+l) &
                                 + dz(kstag2)/(ddz(k3)+ddz(k2)) &
-                                *(pbuffer(j, i, 1) - pcnew)
+                                *(pbuffer(j, i) - pcnew)
                         END DO
                     END DO
                 END DO

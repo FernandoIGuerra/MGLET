@@ -30,7 +30,7 @@ CONTAINS
 
         ! Local variables
         INTEGER(intk) :: idx
-        REAL(realk), POINTER, CONTIGUOUS :: tbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: tbuf(:, :)
         REAL(realk) :: scbvalue(nsca)
 
         ! Only works on scalar SWA and SIO boundaries, should do nothing
@@ -52,7 +52,7 @@ CONTAINS
         CALL get_bcprms(scbvalue, igrid, iface, ibocd)
 
         ! Apply value to buffer
-        CALL f1%buffers%get_buffer(tbuf, igrid, iface)
+        CALL f1%get_buffer(tbuf, igrid, iface)
         tbuf = scbvalue(idx)
     END SUBROUTINE bfront
 
@@ -67,7 +67,7 @@ CONTAINS
 
         ! Local variables
         INTEGER(intk) :: idx
-        REAL(realk), POINTER, CONTIGUOUS :: tbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: tbuf(:, :)
         REAL(realk) :: scbvalue(nsca)
 
         ! Only works on scalar SWA and SIO boundaries, should do nothing
@@ -89,7 +89,7 @@ CONTAINS
         CALL get_bcprms(scbvalue, igrid, iface, ibocd)
 
         ! Apply value to buffer
-        CALL f1%buffers%get_buffer(tbuf, igrid, iface)
+        CALL f1%get_buffer(tbuf, igrid, iface)
         tbuf = scbvalue(idx)
     END SUBROUTINE bright
 
@@ -104,7 +104,7 @@ CONTAINS
 
         ! Local variables
         INTEGER(intk) :: idx
-        REAL(realk), POINTER, CONTIGUOUS :: tbuf(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: tbuf(:, :)
         REAL(realk) :: scbvalue(nsca)
 
         ! Only works on scalar SWA and SIO boundaries, should do nothing
@@ -126,7 +126,7 @@ CONTAINS
         CALL get_bcprms(scbvalue, igrid, iface, ibocd)
 
         ! Apply value to buffer
-        CALL f1%buffers%get_buffer(tbuf, igrid, iface)
+        CALL f1%get_buffer(tbuf, igrid, iface)
         tbuf = scbvalue(idx)
     END SUBROUTINE bbottom
 END MODULE setboundarybuffers_scalar_mod

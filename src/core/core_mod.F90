@@ -10,12 +10,12 @@ MODULE core_mod
     USE config_mod
     USE connect2_mod
     USE corefields_mod
-    USE dlopen_mod
     USE envvars_mod
     USE err_mod
     USE expression_mod
     USE fieldio2_mod
     USE field_mod
+    USE fieldhelper_mod
     USE fields_mod
     USE fort7_mod
     USE grids_mod
@@ -26,6 +26,7 @@ MODULE core_mod
     USE plugins_mod
     USE pointers_mod
     USE precision_mod
+    USE probeoffload_mod
     USE pvtk_mod
     USE qsort_mod
     USE readstl_mod
@@ -94,6 +95,9 @@ CONTAINS
 
         CALL init_precision()
         CALL init_buildinfo()
+#ifdef _MGLET_OFFLOAD_
+        CALL init_offload()
+#endif
         CALL init_timer()
 
         CALL set_timer(1, "MGLET")
@@ -107,7 +111,6 @@ CONTAINS
 
         CALL init_hdf5common()
         CALL init_fort7()
-        CALL init_dlopen()
         CALL init_grids()
         CALL init_pointers()
         CALL init_commbuf()
@@ -136,7 +139,6 @@ CONTAINS
         CALL finish_commbuf()
         CALL finish_pointers()
         CALL finish_grids()
-        CALL finish_dlopen()
         CALL finish_fort7()
         CALL finish_hdf5common()
 

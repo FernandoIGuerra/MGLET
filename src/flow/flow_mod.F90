@@ -143,37 +143,32 @@ CONTAINS
             CALL setboundarybuffers%bound(ilevel, u, v, w, timeph=0.0_realk)
         END DO
 
-        ! The rest of this routine is initializing the flow field - we do not
-        ! want to overwrite results read from a restart file
-        IF (dread) RETURN
-
         ! Set initial condition
-        IF (uinf_is_expr) THEN
-            CALL init_uvw_expr(u, v, w)
-        ELSE
-            CALL init_uvw_uinf(u, v, w)
+        IF (.NOT. dread) THEN
+            IF (uinf_is_expr) THEN
+                CALL init_uvw_expr(u, v, w)
+            ELSE
+                CALL init_uvw_uinf(u, v, w)
+            END IF
+            p%arr = 0.0_realk
         END IF
-        p = 0.0_realk
 
         CALL zero_ghostlayers(u)
         CALL zero_ghostlayers(v)
         CALL zero_ghostlayers(w)
 
         DO ilevel = minlevel, maxlevel
-            CALL connect(ilevel, 2, u, v, w, p, corners=.TRUE.)
-        END DO
-
-        DO ilevel = minlevel+1, maxlevel
             CALL parent(ilevel, u, v, w, p)
             CALL bound_flow%bound(ilevel, u, v, w, p)
+            CALL connect(ilevel, 2, v1=u, v2=v, v3=w, s1=p, corners=.TRUE.)
         END DO
 
         DO ilevel = maxlevel, minlevel+1, -1
-            CALL ftoc(ilevel, u%arr, u%arr, 'U')
-            CALL ftoc(ilevel, v%arr, v%arr, 'V')
-            CALL ftoc(ilevel, w%arr, w%arr, 'W')
-            CALL ftoc(ilevel, p%arr, p%arr, 'P')
+            CALL ftoc(ilevel, u, v, w, p)
         END DO
+
+        ! connect after ftoc (minlevel:maxlevel-1 would be enough)
+        CALL connect(layers=2, v1=u, v2=v, v3=w, s1=p, corners=.TRUE.)
     END SUBROUTINE init_uvwp
 
 
@@ -265,7 +260,7 @@ CONTAINS
         INTEGER(intk) :: i, igrid, iface, ipic, ilevel
         INTEGER(intk) :: kk, jj, ii
         CHARACTER(len=8) :: ctyp
-        REAL(realk), POINTER, CONTIGUOUS :: buf(:, :, :), field(:, :, :)
+        REAL(realk), POINTER, CONTIGUOUS :: buf(:, :), field(:, :, :)
 
         CALL get_field(bu, "BU")
         CALL get_field(bv, "BV")
@@ -280,9 +275,7 @@ CONTAINS
         CALL bwcoarse%copy_from(bw)
 
         DO ilevel = maxlevel, minlevel+1, -1
-            CALL ftoc(ilevel, bucoarse%arr, bucoarse%arr, 'U')
-            CALL ftoc(ilevel, bvcoarse%arr, bvcoarse%arr, 'V')
-            CALL ftoc(ilevel, bwcoarse%arr, bwcoarse%arr, 'W')
+            CALL ftoc(ilevel, bucoarse, bvcoarse, bwcoarse)
         END DO
 
         DO i = 1, nmygrids
@@ -309,20 +302,17 @@ CONTAINS
                 ! to multiply correctly
                 SELECT CASE(iface)
                 CASE(1, 2)
-                    CALL bu%buffers%get_buffer(buf, igrid, iface)
+                    CALL bu%get_buffer(buf, igrid, iface)
                     CALL bucoarse%get_ptr(field, igrid)
-                    buf(:, :, 1) = field(:, :, ipic)
-                    buf(:, :, 2) = field(:, :, ipic)
+                    buf(:, :) = field(:, :, ipic)
                 CASE(3, 4)
-                    CALL bv%buffers%get_buffer(buf, igrid, iface)
+                    CALL bv%get_buffer(buf, igrid, iface)
                     CALL bvcoarse%get_ptr(field, igrid)
-                    buf(:, :, 1) = field(:, ipic, :)
-                    buf(:, :, 2) = field(:, ipic, :)
+                    buf(:, :) = field(:, ipic, :)
                 CASE(5, 6)
-                    CALL bw%buffers%get_buffer(buf, igrid, iface)
+                    CALL bw%get_buffer(buf, igrid, iface)
                     CALL bwcoarse%get_ptr(field, igrid)
-                    buf(:, :, 1) = field(ipic, :, :)
-                    buf(:, :, 2) = field(:, ipic, :)
+                    buf(:, :) = field(ipic, :, :)
                 END SELECT
             END DO
         END DO

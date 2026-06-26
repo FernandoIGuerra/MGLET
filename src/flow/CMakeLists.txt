@@ -7,6 +7,10 @@ add_library(flow STATIC
     flowstat_mod.F90
     gc_compbodyforce_mod.F90
     gc_flowstencils_mod.F90
+    sip_classic_mod.F90
+    sip_hyperplane_mod.F90
+    laplacephi_mod.F90
+    sor_mod.F90
     itinfo_mod.F90
     lesmodel_mod.F90
     plog_mod.F90
@@ -26,6 +30,7 @@ target_link_libraries(flow
     PRIVATE core
     PRIVATE ib
     PRIVATE ${MPI_Fortran_LIBRARIES}
+    PRIVATE $<$<BOOL:${MGLET_OFFLOAD}>:OpenMP::OpenMP_Fortran>
 )
 
 set_source_files_properties(pressuresolver_mod.F90 PROPERTIES COMPILE_FLAGS

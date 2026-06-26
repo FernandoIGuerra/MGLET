@@ -9,6 +9,7 @@ MODULE connect2_mod
         maxlevel, minlevel, get_neighbours, get_mgdims
     USE comms_mod, ONLY: myid, numprocs
     USE field_mod
+    USE qsort_mod, ONLY: sort_conns
 
     IMPLICIT NONE (type, external)
     PRIVATE
@@ -1180,18 +1181,35 @@ CONTAINS
         REAL(realk), POINTER, CONTIGUOUS :: src_rarr(:, :, :), dst_rarr(:, :, :)
         INTEGER(ifk), POINTER, CONTIGUOUS :: src_iarr(:, :, :), &
             dst_iarr(:, :, :)
+        INTEGER(intk) :: i, j, k, ioff, joff, koff
+
+        koff = kstart - kstart_d
+        joff = jstart - jstart_d
+        ioff = istart - istart_d
 
         SELECT TYPE(field)
         TYPE IS (field_t)
             CALL field%get_ptr(src_rarr, igrid)
             CALL field%get_ptr(dst_rarr, igrid_d)
-            dst_rarr(kstart_d:kstop_d, jstart_d:jstop_d, istart_d:istop_d) = &
-                src_rarr(kstart:kstop, jstart:jstop, istart:istop)
+            DO i = istart_d, istop_d
+                DO j = jstart_d, jstop_d
+                    DO k = kstart_d, kstop_d
+                        dst_rarr(k, j, i) = &
+                            src_rarr(k + koff, j + joff, i + ioff)
+                    END DO
+                END DO
+            END DO
         TYPE IS (intfield_t)
             CALL field%get_ptr(src_iarr, igrid)
             CALL field%get_ptr(dst_iarr, igrid_d)
-            dst_iarr(kstart_d:kstop_d, jstart_d:jstop_d, istart_d:istop_d) = &
-                src_iarr(kstart:kstop, jstart:jstop, istart:istop)
+            DO i = istart_d, istop_d
+                DO j = jstart_d, jstop_d
+                    DO k = kstart_d, kstop_d
+                        dst_iarr(k, j, i) = &
+                            src_iarr(k + koff, j + joff, i + ioff)
+                    END DO
+                END DO
+            END DO
         CLASS DEFAULT
             CALL errr(__FILE__, __LINE__)
         END SELECT
@@ -1512,7 +1530,7 @@ CONTAINS
         iRecv = nRecv
 
         ! Sort recvConns by process ID
-        CALL sort_conns(recvConns(:, 1:nRecv))
+        CALL sort_conns(recvConns(:, 1:nRecv), 2)
 
         ! Calculate sdispl offset
         DO i=1, numprocs-1
@@ -1658,37 +1676,6 @@ CONTAINS
         DEALLOCATE(sendReqs)
         DEALLOCATE(recvReqs)
     END SUBROUTINE finish_connect2
-
-
-    SUBROUTINE sort_conns(list)
-        ! Input array to be sorted
-        INTEGER(int32), INTENT(inout) :: list(:, :)
-
-        INTEGER(intk) :: i, j
-
-        ! Temporary storage
-        INTEGER(int32) :: temp(8)
-
-        IF (SIZE(list, 1) /= SIZE(temp)) THEN
-            CALL errr(__FILE__, __LINE__)
-        END IF
-
-        ! Sort by sending processor number (field 2)
-        DO i = 2, SIZE(list, 2)
-            j = i - 1
-            temp(:) = list(:, i)
-            DO WHILE (j >= 1)
-                IF (list(2, j) > temp(2)) THEN
-                    list(:, j+1) = list(:, j)
-                    j = j - 1
-                ELSE
-                    EXIT
-                END IF
-            END DO
-            list(:, j+1) = temp(:)
-        END DO
-
-    END SUBROUTINE sort_conns
 
 
     SUBROUTINE start_and_stop(igrid, iface, istart, &
