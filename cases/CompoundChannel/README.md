@@ -349,6 +349,53 @@ the perturbation amplitude in `ic_expression()` in `make_case.py`.
 
 ## Getting the statistics
 
+Everything MGLET writes is block-structured HDF5. `postprocess.py` collapses it
+onto **one averaged transversal section** -- x is periodic and statistically
+homogeneous, so averaging over it is exact and buys ~Lx/L_int extra independent
+samples -- and writes plain readable files.
+
+```bash
+python3 postprocess.py Dr05                    # uses mgtools if importable
+MGTOOLS_PATH=~/TUMHydro/mgtools-master python3 postprocess.py Dr05
+python3 postprocess.py Dr05 --builtin          # force the fallback reader
+```
+
+Output in `<case>/post/`:
+
+| file | contents |
+|---|---|
+| `xsec.csv` | the collapsed section, one row per (y,z): `y, z, fluid, U, V, W, P, uu, vv, ww, uv, uw, vw, k, omega_x` |
+| `profiles_z.csv` | depth-averaged lateral distributions: `z, depth, Ud, Ud_over_Ub, tau_bed, tau_over_taubar, q_unit` (T&N Figs. 5 and 8) |
+| `profiles_y.csv` | vertical profiles at four stations: `station, z, y, y_wall, y_plus, U, uu, vv, ww, uv` (T&N Fig. 7) |
+| `meta.json` | Dr, Re_tau, nu, TSAMP, U_bulk vs the experimental target, unit conventions |
+| `xsec.vtr` | VTK rectilinear grid for ParaView |
+
+`xsec.csv` keeps solid points with `fluid=0` rather than dropping them, so it
+stays reshapeable: `df.pivot(index='y', columns='z', values='U')` gives a matrix
+for contouring and the L-shaped step stays explicit.
+
+### Conventions
+
+Everything is in wall units, because the case is set up with u_tau = H = rho = 1
+-- the stored numbers *are* the normalised ones. `meta.json` carries `U_bulk` and
+`U_max` so you can renormalise to U/U_max (T&N Fig. 5) without touching the
+solver. `uv` is stored as the raw <u'v'>; T&N and Kara plot -<u'v'>/u_tau^2.
+
+Two things worth knowing about how the numbers are formed:
+
+**Stresses use the x-averaged mean**, `<ui'uj'> = mean_x[<ui uj>] - Ui*Uj`. With
+finite sampling a per-x mean is noisy, and subtracting it would absorb genuine
+turbulence into the mean and under-report the stress.
+
+**The six stresses live on three different edge locations** -- `UV_AVG` on the
+xy-edge, `UW_AVG` on xz, `VW_AVG` on yz (`src/flow/flowstat_mod.F90:100`) -- so
+they must be projected to cell centres before they mean anything as a section.
+With mgtools that is `Field.onto(p)`; the fallback reader does the same
+interpolation. Note that interpolating a product is not the product of the
+interpolations, an O(dx^2) inconsistency that is recorded in `meta.json`.
+
+### Old notes on the assembler
+
 `postprocess.py` (invoked by `run_cases.sh stats`) walks `grids.h5` + `fields.h5`,
 strips ghost cells, de-staggers, averages over the homogeneous streamwise
 direction and stitches the blocks into a single (y, z) map:

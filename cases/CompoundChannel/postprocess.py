@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Assemble MGLET statistics into cross-sectional (y, z) fields.
+"""Collapse MGLET statistics onto a single averaged transversal section.
 
-MGLET stores every field as one flat block per grid. This walks grids.h5 +
-fields.h5, strips ghost cells, de-staggers, averages over the homogeneous
-streamwise direction and stitches the blocks into a single (y, z) map --
-directly comparable with Tominaga & Nezu's isovel and Reynolds-stress figures.
+x is periodic and statistically homogeneous, so averaging over it is exact and
+simply buys ~Lx/L_int extra independent samples. The result is one (y, z)
+cross-section from which every quantity of interest is derived.
 
-    python3 postprocess.py <casedir> [--plot]
+Reads via mgtools when available (MGreadKMT8 matches MGLET-base's layout:
+separate grids.h5/fields.h5, /GRIDINFO and /VOLUMEFIELDS). Field.onto(p)
+projects the staggered velocities onto the pressure locations and
+Field.average('x') collapses the streamwise direction. Falls back to a
+built-in reader if mgtools is not installed.
 
-Writes <casedir>/statistics.npz with U, V, W, P, uu, vv, ww, uv, uw, vw on a
-regular (y, z) grid, plus the derived bulk velocity and secondary-current
-magnitude. Values are in wall units (u_tau = 1) because the case is set up
-with u_tau = 1 by construction.
+    python3 postprocess.py <casedir> [--mgtools-path DIR]
+
+Writes <casedir>/post/:
+    xsec.csv        the collapsed cross-section, one row per (y,z)
+    profiles_z.csv  depth-averaged lateral distributions (T&N Figs. 5, 8)
+    profiles_y.csv  vertical profiles at named stations (T&N Fig. 7)
+    meta.json       Dr, Re_tau, normalisations, sampling time
+    xsec.vtr        VTK rectilinear grid for ParaView
 """
 
 import argparse
@@ -23,166 +30,293 @@ import h5py
 import numpy as np
 
 NGHOST = 2
-MEAN = {"U": "U_AVG", "V": "V_AVG", "W": "W_AVG", "P": "P_AVG"}
-SECOND = {"uu": "UU_AVG", "vv": "VV_AVG", "ww": "WW_AVG",
-          "uv": "UV_AVG", "uw": "UW_AVG", "vw": "VW_AVG"}
+Z_JUNCTION, Z_TOTAL = 2.5, 5.0
+MEANS = {"U": "U_AVG", "V": "V_AVG", "W": "W_AVG", "P": "P_AVG"}
+STRESSES = {"uu": "UU_AVG", "vv": "VV_AVG", "ww": "WW_AVG",
+            "uv": "UV_AVG", "uw": "UW_AVG", "vw": "VW_AVG"}
+PAIRS = dict(uu=("U", "U"), vv=("V", "V"), ww=("W", "W"),
+             uv=("U", "V"), uw=("U", "W"), vw=("V", "W"))
 UB_TARGET = {0.500: 21.28, 0.375: 20.85, 0.250: 20.43}
+STATIONS = {"main_centre": 1.25, "junction_mc": 2.40,
+            "junction_fp": 2.60, "floodplain": 3.75}
 
 
-def load_grids(path):
-    with h5py.File(path, "r") as f:
+# --------------------------------------------------------------- readers ---
+def collapse_mgtools(case, mgpath):
+    """Collapse using mgtools: onto() de-staggers, average('x') collapses."""
+    if mgpath:
+        sys.path.insert(0, mgpath)
+    from mgtools import MGreadKMT8
+
+    reader = MGreadKMT8(os.path.join(case, "fields.h5"),
+                        os.path.join(case, "grids.h5"))
+    with h5py.File(os.path.join(case, "grids.h5"), "r") as f:
         gi = f["GRIDINFO"][:]
-    return gi
+    dy, dz, ny, nz = _geometry(gi)
+
+    acc = {k: np.zeros((ny, nz)) for k in list(MEANS) + list(STRESSES)}
+    cnt = np.zeros((ny, nz))
+    tsamp = None
+    for igrid in range(len(gi)):
+        grid = reader[igrid]
+        p = grid.read("P_AVG")
+        if tsamp is None:
+            tsamp = _tsamp(case)
+        vals = {}
+        for key, name in {**MEANS, **STRESSES}.items():
+            f = grid.read(name)
+            f = f if name == "P_AVG" else f.onto(p)
+            vals[key] = f.average("x", strip=NGHOST).data[0]
+        g = gi[igrid]
+        j0 = int(round(g["BBOX"][2] / dy))
+        k0 = int(round(g["BBOX"][4] / dz))
+        sl = (slice(NGHOST, -NGHOST), slice(NGHOST, -NGHOST))
+        for key, a in vals.items():
+            blk = np.asarray(a)[sl]
+            acc[key][j0:j0 + blk.shape[0], k0:k0 + blk.shape[1]] += blk
+        blk = np.asarray(vals["U"])[sl]
+        cnt[j0:j0 + blk.shape[0], k0:k0 + blk.shape[1]] += 1.0
+    return _finish(acc, cnt, dy, dz, ny, nz, tsamp)
 
 
-def block_view(flat, ii, jj, kk):
-    """Fortran a(kk,jj,ii) stored contiguously -> numpy arr[i, j, k]."""
-    return np.asarray(flat, dtype=np.float64).reshape(ii, jj, kk)
+def collapse_builtin(case):
+    """Fallback: assemble, de-stagger and collapse without mgtools."""
+    with h5py.File(os.path.join(case, "grids.h5"), "r") as f:
+        gi = f["GRIDINFO"][:]
+    dy, dz, ny, nz = _geometry(gi)
+    acc = {k: np.zeros((ny, nz)) for k in list(MEANS) + list(STRESSES)}
+    cnt = np.zeros((ny, nz))
+    with h5py.File(os.path.join(case, "fields.h5"), "r") as f:
+        vol = f["VOLUMEFIELDS"]
+        tsamp = float(vol["U_AVG"].attrs["TSAMP"])
+        for key, name in {**MEANS, **STRESSES}.items():
+            grp = vol[name]
+            data, idx = grp["LEVEL1"], np.asarray(grp["IGRIDLVL"])
+            st = (int(grp.attrs["ISTAG"]), int(grp.attrs["JSTAG"]),
+                  int(grp.attrs["KSTAG"]))
+            for row, igrid in enumerate(idx):
+                g = gi[igrid - 1]
+                ii, jj, kk = int(g["II"]), int(g["JJ"]), int(g["KK"])
+                a = np.asarray(data[row], np.float64).reshape(ii, jj, kk)
+                cell = _destagger(a, st)
+                prof = cell.mean(axis=0)
+                j0 = int(round(g["BBOX"][2] / dy))
+                k0 = int(round(g["BBOX"][4] / dz))
+                acc[key][j0:j0 + prof.shape[0], k0:k0 + prof.shape[1]] += prof
+                if key == "U":
+                    cnt[j0:j0 + prof.shape[0], k0:k0 + prof.shape[1]] += 1.0
+    return _finish(acc, cnt, dy, dz, ny, nz, tsamp)
 
 
-def destagger(arr, istag, jstag, kstag):
-    """Move a staggered field to cell centres, returning only real cells."""
+def _destagger(arr, stag):
     i0, j0, k0 = NGHOST, NGHOST, NGHOST
-    i1, j1, k1 = arr.shape[0] - NGHOST, arr.shape[1] - NGHOST, arr.shape[2] - NGHOST
+    i1, j1, k1 = (arr.shape[0] - NGHOST, arr.shape[1] - NGHOST,
+                  arr.shape[2] - NGHOST)
     cur = arr[i0:i1, j0:j1, k0:k1]
-    if istag:
+    if stag[0]:
         cur = 0.5 * (cur + arr[i0 - 1:i1 - 1, j0:j1, k0:k1])
-    if jstag:
+    if stag[1]:
         cur = 0.5 * (cur + arr[i0:i1, j0 - 1:j1 - 1, k0:k1])
-    if kstag:
+    if stag[2]:
         cur = 0.5 * (cur + arr[i0:i1, j0:j1, k0 - 1:k1 - 1])
     return cur
 
 
-def assemble(casedir, wanted):
-    gpath = os.path.join(casedir, "grids.h5")
-    fpath = os.path.join(casedir, "fields.h5")
-    for p in (gpath, fpath):
-        if not os.path.exists(p):
-            sys.exit(f"missing {p}")
+def _geometry(gi):
+    g0 = gi[0]
+    dy = (g0["BBOX"][3] - g0["BBOX"][2]) / (g0["JJ"] - 2 * NGHOST)
+    dz = (g0["BBOX"][5] - g0["BBOX"][4]) / (g0["KK"] - 2 * NGHOST)
+    return dy, dz, int(round(1.0 / dy)), int(round(Z_TOTAL / dz))
 
-    gi = load_grids(gpath)
-    ny_cells = int(round(1.0 / (gi[0]["BBOX"][3] - gi[0]["BBOX"][2])
-                         * (gi[0]["JJ"] - 2 * NGHOST)))
-    # Derive the global cell counts from any block's size and extent
-    dy = (gi[0]["BBOX"][3] - gi[0]["BBOX"][2]) / (gi[0]["JJ"] - 2 * NGHOST)
-    dz = (gi[0]["BBOX"][5] - gi[0]["BBOX"][4]) / (gi[0]["KK"] - 2 * NGHOST)
-    ny = int(round(1.0 / dy))
-    nz = int(round(5.0 / dz))
 
-    out, tsamp = {}, None
-    with h5py.File(fpath, "r") as f:
-        vol = f["VOLUMEFIELDS"]
-        for key, name in wanted.items():
-            if name not in vol:
-                continue
-            grp = vol[name]
-            data = grp["LEVEL1"]
-            idx = np.asarray(grp["IGRIDLVL"])
-            a = grp.attrs
-            istag, jstag, kstag = int(a["ISTAG"]), int(a["JSTAG"]), int(a["KSTAG"])
-            tsamp = float(a["TSAMP"])
+def _tsamp(case):
+    with h5py.File(os.path.join(case, "fields.h5"), "r") as f:
+        return float(f["VOLUMEFIELDS/U_AVG"].attrs["TSAMP"])
 
-            acc = np.zeros((ny, nz))
-            cnt = np.zeros((ny, nz))
-            for row, igrid in enumerate(idx):
-                g = gi[igrid - 1]
-                ii, jj, kk = int(g["II"]), int(g["JJ"]), int(g["KK"])
-                arr = block_view(data[row], ii, jj, kk)
-                cell = destagger(arr, istag, jstag, kstag)
-                prof = cell.mean(axis=0)                 # average over x
-                j0 = int(round(g["BBOX"][2] / dy))
-                k0 = int(round(g["BBOX"][4] / dz))
-                acc[j0:j0 + prof.shape[0], k0:k0 + prof.shape[1]] += prof
-                cnt[j0:j0 + prof.shape[0], k0:k0 + prof.shape[1]] += 1.0
-            out[key] = np.where(cnt > 0, acc / np.maximum(cnt, 1), np.nan)
 
+def _finish(acc, cnt, dy, dz, ny, nz, tsamp):
+    fluid = cnt > 0
+    out = {k: np.where(fluid, v / np.maximum(cnt, 1), np.nan)
+           for k, v in acc.items()}
+    # Reynolds stresses relative to the x-averaged mean. Using a per-x mean
+    # would absorb genuine turbulence into the mean and under-report these.
+    for key, (a, b) in PAIRS.items():
+        out[key] = out[key] - out[a] * out[b]
     y = (np.arange(ny) + 0.5) * dy
     z = (np.arange(nz) + 0.5) * dz
-    return out, y, z, tsamp
+    return out, y, z, fluid, tsamp
+
+
+# --------------------------------------------------------------- derived ---
+def derive(f, y, z, fluid):
+    f["k"] = 0.5 * (f["uu"] + f["vv"] + f["ww"])
+    W = np.nan_to_num(f["W"]); V = np.nan_to_num(f["V"])
+    dWdy = np.gradient(W, y, axis=0)
+    dVdz = np.gradient(V, z, axis=1)
+    f["omega_x"] = np.where(fluid, dWdy - dVdz, np.nan)
+    return f
+
+
+def lateral(f, y, z, fluid, nu):
+    """Depth-averaged lateral distributions and bed shear."""
+    rows = []
+    for kz in range(len(z)):
+        col = fluid[:, kz]
+        if not col.any():
+            continue
+        jj = np.where(col)[0]
+        depth = (jj[-1] - jj[0] + 1) * (y[1] - y[0])
+        Ud = np.nanmean(f["U"][jj, kz])
+        ybed = y[jj[0]] - 0.5 * (y[1] - y[0])
+        # WW linear branch: tau_w = nu * U1 / y1 (first cell centre)
+        y1 = y[jj[0]] - ybed
+        tau = nu * f["U"][jj[0], kz] / y1
+        rows.append((z[kz], depth, Ud, tau, Ud * depth))
+    a = np.array(rows)
+    return dict(z=a[:, 0], depth=a[:, 1], Ud=a[:, 2], tau_bed=a[:, 3],
+                q_unit=a[:, 4])
+
+
+def vertical(f, y, z, fluid, nu):
+    rows = []
+    for name, zs in STATIONS.items():
+        kz = int(np.argmin(np.abs(z - zs)))
+        jj = np.where(fluid[:, kz])[0]
+        if not len(jj):
+            continue
+        ybed = y[jj[0]] - 0.5 * (y[1] - y[0])
+        for j in jj:
+            yw = y[j] - ybed
+            rows.append((name, z[kz], y[j], yw, yw / nu,
+                         f["U"][j, kz], f["uu"][j, kz], f["vv"][j, kz],
+                         f["ww"][j, kz], f["uv"][j, kz]))
+    return rows
+
+
+# ---------------------------------------------------------------- output ---
+def write_vtr(path, y, z, fields):
+    """Minimal ASCII VTK rectilinear grid of the (y,z) section."""
+    ny, nz = len(y), len(z)
+    yb = np.concatenate([[y[0] - 0.5 * (y[1] - y[0])],
+                         0.5 * (y[:-1] + y[1:]),
+                         [y[-1] + 0.5 * (y[1] - y[0])]])
+    zb = np.concatenate([[z[0] - 0.5 * (z[1] - z[0])],
+                         0.5 * (z[:-1] + z[1:]),
+                         [z[-1] + 0.5 * (z[1] - z[0])]])
+    with open(path, "w") as fh:
+        fh.write('<?xml version="1.0"?>\n<VTKFile type="RectilinearGrid" '
+                 'version="0.1" byte_order="LittleEndian">\n')
+        fh.write(f'  <RectilinearGrid WholeExtent="0 0 0 {ny} 0 {nz}">\n')
+        fh.write(f'    <Piece Extent="0 0 0 {ny} 0 {nz}">\n')
+        fh.write('      <CellData>\n')
+        for name, arr in fields.items():
+            fh.write(f'        <DataArray type="Float32" Name="{name}" '
+                     'format="ascii">\n          ')
+            fh.write(" ".join(f"{v:.6g}" for v in
+                              np.nan_to_num(arr).T.ravel()))
+            fh.write("\n        </DataArray>\n")
+        fh.write('      </CellData>\n      <Coordinates>\n')
+        for nm, arr in (("x", np.array([0.0])), ("y", yb), ("z", zb)):
+            fh.write(f'        <DataArray type="Float32" Name="{nm}" '
+                     'format="ascii">\n          ')
+            fh.write(" ".join(f"{v:.6g}" for v in arr))
+            fh.write("\n        </DataArray>\n")
+        fh.write('      </Coordinates>\n    </Piece>\n  </RectilinearGrid>\n'
+                 '</VTKFile>\n')
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("case")
-    ap.add_argument("--plot", action="store_true")
+    ap.add_argument("--mgtools-path", default=os.environ.get("MGTOOLS_PATH"))
+    ap.add_argument("--builtin", action="store_true",
+                    help="skip mgtools even if available")
     args = ap.parse_args()
 
-    wanted = dict(MEAN)
-    wanted.update(SECOND)
-    fields, y, z, tsamp = assemble(args.case, wanted)
-    if "U" not in fields:
-        sys.exit("no U_AVG in fields.h5 - did the run reach tstat?")
-
-    # Reynolds stresses: MGLET stores <u_i u_j>, subtract the mean product
-    stats = {k: v for k, v in fields.items()}
-    for key, (a, b) in dict(uu=("U", "U"), vv=("V", "V"), ww=("W", "W"),
-                            uv=("U", "V"), uw=("U", "W"),
-                            vw=("V", "W")).items():
-        if key in stats:
-            stats[key] = stats[key] - fields[a] * fields[b]
-
-    valid = ~np.isnan(stats["U"])
-    ub = float(np.nanmean(stats["U"][valid]))
-    vsec = np.hypot(np.nan_to_num(stats["V"]), np.nan_to_num(stats["W"]))
-    umax = float(np.nanmax(stats["U"]))
-
-    dr = None
-    pj = os.path.join(args.case, "parameters.json")
-    if os.path.exists(pj):
-        gradp = json.load(open(pj))["flow"]["gradp"][0]
-        rh = -1.0 / gradp
-        drv = (rh * 7.0 - 2.5) / 2.5
-        dr = min(UB_TARGET, key=lambda d: abs(d - drv))
-
-    print(f"case            {args.case}")
-    print(f"averaging time  TSAMP = {tsamp:.2f} H/u_tau")
-    print(f"grid            {stats['U'].shape[0]} x {stats['U'].shape[1]} (y, z),"
-          f" {int(valid.sum())} fluid points")
-    print(f"U_b/u_tau       {ub:.3f}", end="")
-    if dr:
-        print(f"   target {UB_TARGET[dr]:.2f}   deviation {100*(ub/UB_TARGET[dr]-1):+.1f} %")
+    backend = "builtin"
+    if not args.builtin:
+        try:
+            f, y, z, fluid, tsamp = collapse_mgtools(args.case, args.mgtools_path)
+            backend = "mgtools"
+        except ImportError:
+            f, y, z, fluid, tsamp = collapse_builtin(args.case)
     else:
-        print()
-    print(f"U_max/u_tau     {umax:.3f}")
-    print(f"secondary curr. max |V,W| = {np.nanmax(vsec):.3f} u_tau"
-          f"  = {100*np.nanmax(vsec)/umax:.1f} % of U_max"
-          f"   (Tominaga & Nezu report ~2-4 %)")
+        f, y, z, fluid, tsamp = collapse_builtin(args.case)
+    print(f"backend: {backend}")
 
-    out = os.path.join(args.case, "statistics.npz")
-    np.savez(out, y=y, z=z, tsamp=tsamp, **stats)
-    print(f"wrote {out}")
+    with open(os.path.join(args.case, "parameters.json")) as fh:
+        par = json.load(fh)
+    nu = par["flow"]["gmol"] / par["flow"].get("rho", 1.0)
+    re_tau = 1.0 / nu
+    dr = min(UB_TARGET, key=lambda d: abs(d - ((-1.0 / par["flow"]["gradp"][0])
+                                               * 7.0 - 2.5) / 2.5))
+    f = derive(f, y, z, fluid)
 
-    if args.plot:
-        _plot(stats, y, z, args.case, umax)
+    ub = float(np.nanmean(f["U"][fluid]))
+    umax = float(np.nanmax(f["U"]))
+    lat = lateral(f, y, z, fluid, nu)
+    vert = vertical(f, y, z, fluid, nu)
 
+    out = os.path.join(args.case, "post")
+    os.makedirs(out, exist_ok=True)
 
-def _plot(stats, y, z, case, umax):
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("matplotlib not available, skipping plots")
-        return
-    Z, Y = np.meshgrid(z, y)
-    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
-    cs = axes[0].contour(Z, Y, stats["U"] / umax, levels=np.arange(0.4, 1.0, 0.05))
-    axes[0].clabel(cs, fontsize=6)
-    axes[0].set_ylabel("y/H")
-    axes[0].set_title(r"$U/U_{max}$  (cf. Tominaga & Nezu Fig. 5)")
-    step = 8
-    axes[1].quiver(Z[::step, ::step], Y[::step, ::step],
-                   stats["W"][::step, ::step], stats["V"][::step, ::step])
-    axes[1].set_xlabel("z/H")
-    axes[1].set_ylabel("y/H")
-    axes[1].set_title("secondary currents (V, W)  (cf. Fig. 3)")
-    for ax in axes:
-        ax.set_aspect("equal")
-    fig.tight_layout()
-    p = os.path.join(case, "statistics.png")
-    fig.savefig(p, dpi=130)
-    print(f"wrote {p}")
+    cols = ["U", "V", "W", "P", "uu", "vv", "ww", "uv", "uw", "vw",
+            "k", "omega_x"]
+    Y, Z = np.meshgrid(y, z, indexing="ij")
+    with open(os.path.join(out, "xsec.csv"), "w") as fh:
+        fh.write("y,z,fluid," + ",".join(cols) + "\n")
+        for j in range(len(y)):
+            for kz in range(len(z)):
+                vals = ",".join("" if np.isnan(f[c][j, kz]) else
+                                f"{f[c][j, kz]:.6g}" for c in cols)
+                fh.write(f"{Y[j,kz]:.6g},{Z[j,kz]:.6g},"
+                         f"{int(fluid[j,kz])},{vals}\n")
+
+    with open(os.path.join(out, "profiles_z.csv"), "w") as fh:
+        fh.write("z,depth,Ud,Ud_over_Ub,tau_bed,tau_over_taubar,q_unit\n")
+        tbar = float(np.mean(lat["tau_bed"]))
+        for i in range(len(lat["z"])):
+            fh.write(f"{lat['z'][i]:.6g},{lat['depth'][i]:.6g},"
+                     f"{lat['Ud'][i]:.6g},{lat['Ud'][i]/ub:.6g},"
+                     f"{lat['tau_bed'][i]:.6g},{lat['tau_bed'][i]/tbar:.6g},"
+                     f"{lat['q_unit'][i]:.6g}\n")
+
+    with open(os.path.join(out, "profiles_y.csv"), "w") as fh:
+        fh.write("station,z,y,y_wall,y_plus,U,uu,vv,ww,uv\n")
+        for r in vert:
+            fh.write(f"{r[0]},{r[1]:.6g},{r[2]:.6g},{r[3]:.6g},{r[4]:.6g},"
+                     f"{r[5]:.6g},{r[6]:.6g},{r[7]:.6g},{r[8]:.6g},"
+                     f"{r[9]:.6g}\n")
+
+    write_vtr(os.path.join(out, "xsec.vtr"), y, z,
+              {c: f[c] for c in cols} | {"fluid": fluid.astype(float)})
+
+    meta = {
+        "case": os.path.basename(os.path.abspath(args.case)),
+        "Dr": dr, "Re_tau": round(re_tau, 1), "nu": nu,
+        "backend": backend, "tsamp": tsamp,
+        "grid": {"ny": len(y), "nz": len(z),
+                 "dy": float(y[1] - y[0]), "dz": float(z[1] - z[0])},
+        "units": {"length": "H", "velocity": "u_tau", "stress": "u_tau^2"},
+        "derived": {"U_bulk": ub, "U_max": umax,
+                    "U_bulk_target": UB_TARGET[dr],
+                    "deviation_pct": 100 * (ub / UB_TARGET[dr] - 1)},
+        "conventions": {
+            "reynolds_stress": "<ui'uj'> = mean_x[<ui uj>] - Ui*Uj, with Ui "
+                               "the x-averaged mean",
+            "sign": "uv is <u'v'>; Tominaga & Nezu plot -<u'v'>/u_tau^2",
+            "note": "cross-stresses are stored on edges and interpolated to "
+                    "cell centres, an O(dx^2) inconsistency vs U*V",
+        },
+    }
+    with open(os.path.join(out, "meta.json"), "w") as fh:
+        json.dump(meta, fh, indent=2)
+
+    print(f"  U_b/u_tau = {ub:.3f}  (target {UB_TARGET[dr]:.2f}, "
+          f"{100*(ub/UB_TARGET[dr]-1):+.1f} %)")
+    print(f"  U_max/u_tau = {umax:.3f}   TSAMP = {tsamp:.1f}")
+    print(f"  wrote {out}/ (xsec.csv, profiles_z.csv, profiles_y.csv, "
+          f"meta.json, xsec.vtr)")
 
 
 if __name__ == "__main__":
