@@ -157,24 +157,68 @@ def derive(f, y, z, fluid):
     return f
 
 
+def ww_tau(u1, dds, nu, rho=1.0):
+    """Werner-Wengle wall shear -- identical to src/flow/wernerwengle_mod.F90.
+
+    Using the solver's own wall model is the self-consistent choice: the local
+    tau_w(z) then integrates to the global balance that gradp imposes. A naive
+    tau = mu*U1/y1 assumes U+ = y+ and is only valid deep in the viscous
+    sublayer; it under-predicts by ~1 % at y1+ = 3.7 but ~8 % at y1+ = 7.5.
+    """
+    A, b = 8.3, 1.0 / 7.0
+    cpo1, cpo2 = 1.0 - b, 1.0 + b
+    cpo4 = cpo2 / A * nu ** b
+    cpo5 = 0.5 * cpo1 * A ** (cpo2 / cpo1) * nu ** cpo2
+    cpo6 = 0.5 * nu * A ** (2.0 / cpo1)
+    cpo8 = 2.0 / cpo2
+    un = np.abs(u1)
+    lam = 2.0 * rho * nu * un / dds
+    turb = rho * (dds ** (-b) * (cpo4 * un + cpo5 / dds)) ** cpo8
+    return np.sign(u1) * np.where(un >= cpo6 / dds, turb, lam)
+
+
+def clauser_utau(yw, u, nu, kappa=0.41, B=5.3):
+    """u_tau from a log-law fit -- the method Tominaga & Nezu used.
+
+    Needs only the log region, not the viscous sublayer, so it is insensitive
+    to a coarse first cell. Note it *assumes* the universal kappa and B: if the
+    LES has a log-layer mismatch the fit absorbs it, so a fitted u_tau is not
+    the same quantity as the u_tau that gradp imposes. Report which one.
+    """
+    ut = 1.0
+    for _ in range(60):
+        yp = yw * ut / nu
+        m = (yp > 30.0) & (yp < 0.25 * np.max(yp))
+        if m.sum() < 3:
+            return np.nan
+        pred = (np.log(yp[m]) / kappa + B)
+        ut_new = np.sum(u[m] * pred) / np.sum(pred * pred)
+        if abs(ut_new - ut) < 1e-10:
+            break
+        ut = 0.5 * (ut + ut_new)
+    return ut
+
+
 def lateral(f, y, z, fluid, nu):
     """Depth-averaged lateral distributions and bed shear."""
+    dy = y[1] - y[0]
     rows = []
     for kz in range(len(z)):
         col = fluid[:, kz]
         if not col.any():
             continue
         jj = np.where(col)[0]
-        depth = (jj[-1] - jj[0] + 1) * (y[1] - y[0])
+        depth = (jj[-1] - jj[0] + 1) * dy
         Ud = np.nanmean(f["U"][jj, kz])
-        ybed = y[jj[0]] - 0.5 * (y[1] - y[0])
-        # WW linear branch: tau_w = nu * U1 / y1 (first cell centre)
-        y1 = y[jj[0]] - ybed
-        tau = nu * f["U"][jj[0], kz] / y1
-        rows.append((z[kz], depth, Ud, tau, Ud * depth))
+        u1 = f["U"][jj[0], kz]
+        tau_ww = float(ww_tau(u1, dy, nu))       # dds = full cell size
+        tau_lin = nu * u1 / (0.5 * dy)
+        yw = (y[jj] - (y[jj[0]] - 0.5 * dy))
+        ut_log = clauser_utau(yw, f["U"][jj, kz], nu)
+        rows.append((z[kz], depth, Ud, tau_ww, tau_lin, ut_log, Ud * depth))
     a = np.array(rows)
     return dict(z=a[:, 0], depth=a[:, 1], Ud=a[:, 2], tau_bed=a[:, 3],
-                q_unit=a[:, 4])
+                tau_linear=a[:, 4], utau_loglaw=a[:, 5], q_unit=a[:, 6])
 
 
 def vertical(f, y, z, fluid, nu):
@@ -273,12 +317,15 @@ def main():
                          f"{int(fluid[j,kz])},{vals}\n")
 
     with open(os.path.join(out, "profiles_z.csv"), "w") as fh:
-        fh.write("z,depth,Ud,Ud_over_Ub,tau_bed,tau_over_taubar,q_unit\n")
+        fh.write("z,depth,Ud,Ud_over_Ub,tau_bed,tau_over_taubar,"
+                 "utau_local,tau_linear,utau_loglaw,q_unit\n")
         tbar = float(np.mean(lat["tau_bed"]))
         for i in range(len(lat["z"])):
             fh.write(f"{lat['z'][i]:.6g},{lat['depth'][i]:.6g},"
                      f"{lat['Ud'][i]:.6g},{lat['Ud'][i]/ub:.6g},"
                      f"{lat['tau_bed'][i]:.6g},{lat['tau_bed'][i]/tbar:.6g},"
+                     f"{np.sqrt(abs(lat['tau_bed'][i])):.6g},"
+                     f"{lat['tau_linear'][i]:.6g},{lat['utau_loglaw'][i]:.6g},"
                      f"{lat['q_unit'][i]:.6g}\n")
 
     with open(os.path.join(out, "profiles_y.csv"), "w") as fh:
@@ -301,6 +348,17 @@ def main():
         "derived": {"U_bulk": ub, "U_max": umax,
                     "U_bulk_target": UB_TARGET[dr],
                     "deviation_pct": 100 * (ub / UB_TARGET[dr] - 1)},
+        "u_tau": {
+            "global": "exactly 1 by construction: tau_avg = |gradp|*A/P = 1. "
+                      "No wall gradient is needed or used.",
+            "local_tau_bed": "Werner-Wengle, identical to the solver's own "
+                             "wall model, so tau(z) integrates to the global "
+                             "balance",
+            "utau_loglaw": "Clauser fit assuming kappa=0.41, B=5.3 - the same "
+                           "method Tominaga & Nezu used for U*. Not the same "
+                           "quantity as the imposed u_tau if the log law is "
+                           "shifted.",
+        },
         "conventions": {
             "reynolds_stress": "<ui'uj'> = mean_x[<ui uj>] - Ui*Uj, with Ui "
                                "the x-averaged mean",
