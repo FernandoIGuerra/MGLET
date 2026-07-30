@@ -7,7 +7,11 @@
 #   ./run_cases.sh smoke   [case...]  20 steps at full size: does the grid load?
 #   ./run_cases.sh coarse  [case...]  transition on a cheap coarse grid (DNS)
 #   ./run_cases.sh map     [case...]  interpolate coarse field -> fine grid
-#   ./run_cases.sh ladder  [case...]  progressive 40->80->fine sequencing
+#   ./run_cases.sh middle  [case...]  refine onto an intermediate grid
+#                                    (FROM=40 TO=80 TEND=20)
+#   ./run_cases.sh finer   [case...]  refine onto the production grid
+#                                    (FROM=80 TDEV=5)
+#   ./run_cases.sh ladder  [case...]  all rungs in one go
 #   ./run_cases.sh spinup  [case...]  spin up directly on the fine grid
 #   ./run_cases.sh run     [case...]  full production run (single stage)
 #   ./run_cases.sh average [case...]  restart a spinup with statistics on
@@ -195,6 +199,60 @@ PY
 }
 
 
+
+# Dr of a case, recovered from its gradp (= -P/A = -1/Rh)
+case_dr() {
+    python3 -c "
+import json;g=json.load(open('$HERE/$1/parameters.json'))['flow']['gradp'][0]
+print(round((-1.0/g*7.0-2.5)/2.5,3))"
+}
+
+# Locate a developed field. FROM may be a resolution (40 -> <case>.L40, or
+# <case>.coarse) or an explicit directory.
+resolve_src() {   # resolve_src <case> <from>
+    local c="$1" from="$2" cand
+    for cand in "$from" "$HERE/$from" "$HERE/$c.L$from" "$HERE/$c.coarse"; do
+        [[ -f "$cand/fields.h5" ]] && { echo "$cand"; return 0; }
+    done
+    die "no developed field for FROM=$from (tried $c.L$from, $c.coarse, $from)"
+}
+
+# Refine onto an INTERMEDIATE grid:  FROM=40 TO=80 TEND=20 ./run_cases.sh middle Dr05
+do_middle() {
+    local from="${FROM:-40}" to="${TO:-80}" tend="${TEND:-20}"
+    for c in $@; do
+        local src; src=$(resolve_src "$c" "$from")
+        local dst="$HERE/$c.L$to" dr; dr=$(case_dr "$c")
+        say "middle[$c]: ncy $from -> $to  (source $(basename "$src")), tend=$tend"
+        python3 "$HERE/make_case.py" --dr "$dr" --outdir "$dst" --ncy "$to" \
+            --block 8 --lesmodel wale --tend "$tend" --tstat 1e9 \
+            --spod-planes 0 >/dev/null
+        python3 "$HERE/map_field.py" --from "$src" --to "$dst" \
+            --out "$dst/restart.h5"
+        patch_restart "$dst/parameters.json" "$tend"
+        launch "$dst" "middle[$c/ncy=$to]"
+        python3 "$HERE/monitor.py" "$dst" || true
+    done
+}
+
+# Final hop onto the PRODUCTION grid:  FROM=80 TDEV=5 ./run_cases.sh finer Dr05
+do_finer() {
+    local from="${FROM:-80}" tdev="${TDEV:-5}"
+    for c in $@; do
+        local src; src=$(resolve_src "$c" "$from")
+        local dst="$HERE/$c.dev"
+        mkdir -p "$dst"; ln -sf "$HERE/$c/grids.h5" "$dst/grids.h5"
+        say "finer[$c]: $(basename "$src") -> production grid, tend=$tdev"
+        python3 "$HERE/map_field.py" --from "$src" --to "$HERE/$c" \
+            --out "$dst/restart.h5"
+        cp -f "$HERE/$c/parameters.json" "$dst/parameters.json"
+        patch_restart "$dst/parameters.json" "$tdev"
+        launch "$dst" "finer[$c]"
+        python3 "$HERE/monitor.py" "$dst" || true
+        say "finer[$c] done. If converged: TAVG=... $0 average $c"
+    done
+}
+
 # Progressive grid sequencing: 40 -> 80 -> ... -> production grid. Each rung is
 # mapped from the previous one, so every interpolation is a small jump and the
 # field arrives at the fine grid already close to its solution. The first rung
@@ -313,6 +371,8 @@ case "$cmd" in
     spinup)  do_spinup $targets ;;
     coarse)  do_coarse $targets ;;
     map)     do_map $targets ;;
+    middle)  do_middle $targets ;;
+    finer)   do_finer $targets ;;
     ladder)  do_ladder $targets ;;
     run)     do_run $targets ;;
     average) do_average $targets ;;
@@ -326,6 +386,6 @@ case "$cmd" in
         say "staged checks done. Inspect the spinup, pick t_start, then: TAVG=200 $0 average"
         ;;
     *)
-        sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+        sed -n '3,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
         exit 1 ;;
 esac
