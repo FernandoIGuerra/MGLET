@@ -5,7 +5,9 @@
 #   ./run_cases.sh build              configure + compile
 #   ./run_cases.sh check              run the MGLET test suite
 #   ./run_cases.sh smoke   [case...]  20 steps at full size: does the grid load?
-#   ./run_cases.sh spinup  [case...]  stage 1: spin up, no statistics
+#   ./run_cases.sh coarse  [case...]  transition on a cheap coarse grid (DNS)
+#   ./run_cases.sh map     [case...]  interpolate coarse field -> fine grid
+#   ./run_cases.sh spinup  [case...]  spin up directly on the fine grid
 #   ./run_cases.sh run     [case...]  full production run (single stage)
 #   ./run_cases.sh average [case...]  restart a spinup with statistics on
 #                                    (TAVG=200 sets the averaging window)
@@ -139,13 +141,66 @@ PY
     done
 }
 
+# Grid sequencing. Transition to turbulence costs O(20-50) eddy turnovers and
+# does not need the production resolution, so do it on a cheap coarse grid.
+# LES model off: on a coarse grid an eddy viscosity suppresses transition, and
+# the point here is only to produce a chaotic, turbulent-like field to seed the
+# fine grid.
+do_coarse() {
+    local ncy="${COARSE_NCY:-40}" tend="${COARSE_TEND:-60}"
+    for c in $@; do
+        local dst="$HERE/$c.coarse"
+        local dr; dr=$(python3 -c "
+import json;g=json.load(open('$HERE/$c/parameters.json'))['flow']['gradp'][0]
+print(round((-1.0/g*7.0-2.5)/2.5,3))")
+        say "coarse[$c]: Dr=$dr, ncy=$ncy, DNS (no LES model), tend=$tend"
+        python3 "$HERE/make_case.py" --dr "$dr" --outdir "$dst" --ncy "$ncy" \
+            --block 8 --lesmodel none --tend "$tend" --tstat 1e9 \
+            --spod-planes 0 >/dev/null
+        python3 - "$dst/parameters.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["time"]["itinfo"] = 20
+json.dump(d, open(sys.argv[1], "w"), indent=4)
+PY
+        launch "$dst" "coarse[$c]"
+        python3 "$HERE/monitor.py" "$dst" || true
+    done
+}
+
+# Interpolate the developed coarse field onto the fine grid and run it there
+# until it re-adjusts. Only u,v,w are mapped; P is re-established by the solver.
+do_map() {
+    local tdev="${TDEV:-20}"
+    for c in $@; do
+        local src="$HERE/$c.coarse" dst="$HERE/$c.dev"
+        [[ -f "$src/fields.h5" ]] || die "no $src/fields.h5 - run '$0 coarse $c' first"
+        mkdir -p "$dst"
+        ln -sf "$HERE/$c/grids.h5" "$dst/grids.h5"
+        python3 "$HERE/map_field.py" --from "$src" --to "$HERE/$c" \
+            --out "$dst/restart.h5"
+        python3 - "$HERE/$c/parameters.json" "$dst/parameters.json" "$tdev" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["io"]["infile"] = "restart.h5"
+d["io"]["outfile"] = "fields.h5"
+d["time"].update(read=True, tend=float(sys.argv[3]), tstat=1e9, itinfo=10)
+d["time"]["continue"] = False      # clock restarts at 0; no RUNINFO needed
+d.pop("statistics", None)
+json.dump(d, open(sys.argv[2], "w"), indent=4)
+PY
+        launch "$dst" "map[$c]"
+        python3 "$HERE/monitor.py" "$dst" || true
+    done
+}
+
 # Stage 2: restart from a finished spinup with statistics switched on.
 # tstat and tend are decided from the observed spinup, not guessed in advance.
 do_average() {
     local tavg="${TAVG:-200}"
     for c in $@; do
-        local src="$HERE/$c.spinup" dst="$HERE/$c.avg"
-        [[ -f "$src/fields.h5" ]] || die "no $src/fields.h5 - run '$0 spinup $c' first"
+        local src="$HERE/$c.dev" dst="$HERE/$c.avg"
+        [[ -f "$src/fields.h5" ]] || src="$HERE/$c.spinup"
+        [[ -f "$src/fields.h5" ]] || die "no developed field - run '$0 coarse $c && $0 map $c' first"
         mkdir -p "$dst"
         ln -sf "$HERE/$c/grids.h5" "$dst/grids.h5"
         cp -f "$src/fields.h5" "$dst/restart.h5"
@@ -186,6 +241,8 @@ case "$cmd" in
     check)   do_check ;;
     smoke)   do_smoke $targets ;;
     spinup)  do_spinup $targets ;;
+    coarse)  do_coarse $targets ;;
+    map)     do_map $targets ;;
     run)     do_run $targets ;;
     average) do_average $targets ;;
     monitor) do_monitor $targets ;;
@@ -198,6 +255,6 @@ case "$cmd" in
         say "staged checks done. Inspect the spinup, pick t_start, then: TAVG=200 $0 average"
         ;;
     *)
-        sed -n '3,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+        sed -n '3,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
         exit 1 ;;
 esac
