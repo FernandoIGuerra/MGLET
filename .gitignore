@@ -57,3 +57,6 @@ mglet
 build*
 out*
 
+
+# Reference papers - copyrighted journal PDFs, not redistributable
+Reference/
