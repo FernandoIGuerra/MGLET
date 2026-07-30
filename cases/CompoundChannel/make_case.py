@@ -26,6 +26,7 @@ floodplain wall).  The solid step occupies z > 2.5, y < D with D = 1 - Dr.
 
 import argparse
 import json
+import math
 import os
 
 import h5py
@@ -356,6 +357,24 @@ def spod_arrays(blk, nplanes=16, sub=4, surface=True):
     return arrays
 
 
+def initial_dt(blk, re_tau, cfl, safety=0.9):
+    """CFL-consistent starting timestep.
+
+    Convection and diffusion are advanced explicitly (Williamson RK3), so there
+    is a hard stability limit near CFL ~ sqrt(3). MGLET's dt controller
+    (src/timeloop_mod.F90:450) is a slow integral relaxation over
+    ndtrelax*itinfo steps, so a bad initial dt is NOT corrected quickly -- at
+    itinfo = 100 that is 50000 steps. dt must therefore be right at t = 0.
+
+    MGLET's CFL is the directional sum |u|/dx + |v|/dy + |w|/dz, so all three
+    contributions are included here.
+    """
+    umax = (2.43902 * math.log(re_tau) + 5.3) * 1.25   # log law + IC modulation
+    vmax = 0.8 * 1.6                                    # IC cross-flow amplitude
+    denom = umax / blk.dx + vmax / blk.dy + vmax / blk.dz
+    return safety * cfl / denom
+
+
 def write_parameters(blk, re_tau, path, tend, tstat, dt, cfl, lesmodel,
                      spod_planes, spod_sub, spod_surface, probe_itsamp):
     rh = hydraulic_radius(blk.dr)
@@ -445,7 +464,9 @@ def main():
     p.add_argument("--tend", type=float, default=400.0, help="end time in H/u_tau")
     p.add_argument("--tstat", type=float, default=100.0,
                    help="time at which statistics sampling starts")
-    p.add_argument("--dt", type=float, default=2.0e-3)
+    p.add_argument("--dt", type=float, default=None,
+                   help="initial timestep (default: derived from the grid "
+                        "so the run starts at CFL ~0.6*--cfl)")
     p.add_argument("--cfl", type=float, default=0.8)
     p.add_argument("--lesmodel", default="wale", choices=["wale", "smagorinsky", "none"])
     p.add_argument("--spod-planes", type=int, default=16,
@@ -471,11 +492,12 @@ def main():
 
     blk = Blocking(args.dr, args.lx, ncx, args.ncy, ncz_half, nxb, 2 * nzb_half)
     re_tau = args.re_tau if args.re_tau is not None else RE_TAU[args.dr]
+    dt0 = args.dt if args.dt is not None else initial_dt(blk, re_tau, args.cfl)
 
     os.makedirs(args.outdir, exist_ok=True)
     write_grids(blk, os.path.join(args.outdir, "grids.h5"))
     write_parameters(blk, re_tau, os.path.join(args.outdir, "parameters.json"),
-                     args.tend, args.tstat, args.dt, args.cfl, args.lesmodel,
+                     args.tend, args.tstat, dt0, args.cfl, args.lesmodel,
                      args.spod_planes, args.spod_sub, not args.no_surface,
                      args.probe_itsamp)
 
