@@ -7,6 +7,7 @@
 #   ./run_cases.sh smoke   [case...]  20 steps at full size: does the grid load?
 #   ./run_cases.sh coarse  [case...]  transition on a cheap coarse grid (DNS)
 #   ./run_cases.sh map     [case...]  interpolate coarse field -> fine grid
+#   ./run_cases.sh ladder  [case...]  progressive 40->80->fine sequencing
 #   ./run_cases.sh spinup  [case...]  spin up directly on the fine grid
 #   ./run_cases.sh run     [case...]  full production run (single stage)
 #   ./run_cases.sh average [case...]  restart a spinup with statistics on
@@ -193,6 +194,75 @@ PY
     done
 }
 
+
+# Progressive grid sequencing: 40 -> 80 -> ... -> production grid. Each rung is
+# mapped from the previous one, so every interpolation is a small jump and the
+# field arrives at the fine grid already close to its solution. The first rung
+# runs as DNS (no LES model) to let transition happen; later rungs use WALE.
+#
+#   LADDER="40 80"   intermediate ncy values (production grid is always last)
+#   LADDER_T="60 20" time on each intermediate rung
+#   TDEV=5           time on the production grid before averaging
+do_ladder() {
+    local rungs times
+    read -r -a rungs <<< "${LADDER:-40 80}"
+    read -r -a times <<< "${LADDER_T:-60 20}"
+    local tdev="${TDEV:-5}"
+    for c in $@; do
+        local dr; dr=$(python3 -c "
+import json;g=json.load(open('$HERE/$c/parameters.json'))['flow']['gradp'][0]
+print(round((-1.0/g*7.0-2.5)/2.5,3))")
+        local prev=""
+        local i
+        for i in "${!rungs[@]}"; do
+            local ncy="${rungs[$i]}" tend="${times[$i]:-20}"
+            local dst="$HERE/$c.L$ncy" les="wale"
+            [[ -z "$prev" ]] && les="none"     # DNS on the first rung only
+            say "ladder[$c]: ncy=$ncy, lesmodel=$les, tend=$tend"
+            python3 "$HERE/make_case.py" --dr "$dr" --outdir "$dst" --ncy "$ncy" \
+                --block 8 --lesmodel "$les" --tend "$tend" --tstat 1e9 \
+                --spod-planes 0 >/dev/null
+            if [[ -n "$prev" ]]; then
+                python3 "$HERE/map_field.py" --from "$prev" --to "$dst" \
+                    --out "$dst/restart.h5"
+                patch_restart "$dst/parameters.json" "$tend"
+            fi
+            python3 - "$dst/parameters.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["time"]["itinfo"] = 20
+json.dump(d, open(sys.argv[1], "w"), indent=4)
+PY
+            launch "$dst" "ladder[$c/ncy=$ncy]"
+            python3 "$HERE/monitor.py" "$dst" || true
+            prev="$dst"
+        done
+        # Final hop onto the production grid
+        local dev="$HERE/$c.dev"
+        mkdir -p "$dev"; ln -sf "$HERE/$c/grids.h5" "$dev/grids.h5"
+        python3 "$HERE/map_field.py" --from "$prev" --to "$HERE/$c" \
+            --out "$dev/restart.h5"
+        cp -f "$HERE/$c/parameters.json" "$dev/parameters.json"
+        patch_restart "$dev/parameters.json" "$tdev"
+        launch "$dev" "ladder[$c/production]"
+        python3 "$HERE/monitor.py" "$dev" || true
+        say "ladder[$c] done. If converged: TAVG=... $0 average $c"
+    done
+}
+
+# Point a parameters.json at restart.h5 and run for <tend> with statistics off.
+patch_restart() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["io"]["infile"] = "restart.h5"
+d["io"]["outfile"] = "fields.h5"
+d["time"].update(read=True, tend=float(sys.argv[2]), tstat=1e9)
+d["time"]["continue"] = False     # clock restarts at 0; no RUNINFO needed
+d.pop("statistics", None)
+json.dump(d, open(sys.argv[1], "w"), indent=4)
+PY
+}
+
 # Stage 2: restart from a finished spinup with statistics switched on.
 # tstat and tend are decided from the observed spinup, not guessed in advance.
 do_average() {
@@ -243,6 +313,7 @@ case "$cmd" in
     spinup)  do_spinup $targets ;;
     coarse)  do_coarse $targets ;;
     map)     do_map $targets ;;
+    ladder)  do_ladder $targets ;;
     run)     do_run $targets ;;
     average) do_average $targets ;;
     monitor) do_monitor $targets ;;
@@ -255,6 +326,6 @@ case "$cmd" in
         say "staged checks done. Inspect the spinup, pick t_start, then: TAVG=200 $0 average"
         ;;
     *)
-        sed -n '3,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+        sed -n '3,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
         exit 1 ;;
 esac
