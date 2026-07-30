@@ -308,13 +308,60 @@ python3 make_case.py --dr 0.5 --outdir test --ncy 24 --block 8   # coarse smoke 
 
 Useful options: `--lx`, `--ncy`, `--re-tau`, `--tend`, `--tstat`, `--lesmodel`.
 
-## Running
+## Building and running
+
+Everything goes through `run_cases.sh`. From this directory:
 
 ```bash
-cd Dr05 && mpirun -n <N> /path/to/mglet
+./run_cases.sh build          # cmake --preset=gnu-release + make -j
+./run_cases.sh check          # MGLET's own test suite
+./run_cases.sh smoke          # 20 steps at full size: does the grid load?
+./run_cases.sh spinup         # to t = 30: does it become turbulent?
+./run_cases.sh run            # full production
+./run_cases.sh monitor        # development / stationarity diagnostics
+./run_cases.sh stats          # assemble statistics into (y,z) fields
 ```
 
-`N` must not exceed the number of grids (3600 / 3300 / 3000).
+`./run_cases.sh all` chains build → check → smoke → spinup and deliberately
+stops short of the production run.
+
+Overrides: `NP=64` (MPI ranks), `PRESET=intel-release`, `BUILD=<dir>`,
+`MGLET_BIN=<path>`, `CASES="Dr05"`.
+
+Prerequisites: C/C++/Fortran compilers with Fortran 2008 + TS 29113, an MPI
+library providing `MPI_f08`, HDF5 with MPI support, CMake, and Python with
+`h5py`/`numpy` (`matplotlib` optional, for plots). nlohmann/json and exprtk are
+fetched automatically by CMake.
+
+If `cmake` stops at `FortranCInterface_VERIFY`, the C and Fortran compilers come
+from different toolchains (a conda-vs-system mix does this). Put one toolchain
+first in `PATH`, delete the build directory, and reconfigure.
+
+`NP` must not exceed the grid count (3600 / 3300 / 3000) — a grid cannot be
+split across ranks. `run_cases.sh` checks this before launching.
+
+**Do the staged checks first.** `smoke` catches memory/decomposition problems in
+minutes, and `spinup` answers the one question that can otherwise waste days:
+whether the initial condition actually transitions to turbulence rather than
+decaying back to laminar. In `LOGS/uvwbulk.log`, `VVBULK`/`WWBULK` should grow
+and `UBULK` should bend over well below the laminar runaway. If it stalls, raise
+the perturbation amplitude in `ic_expression()` in `make_case.py`.
+
+## Getting the statistics
+
+`postprocess.py` (invoked by `run_cases.sh stats`) walks `grids.h5` + `fields.h5`,
+strips ghost cells, de-staggers, averages over the homogeneous streamwise
+direction and stitches the blocks into a single (y, z) map:
+
+```bash
+python3 postprocess.py Dr05 --plot
+```
+
+It writes `statistics.npz` (U, V, W, P and all six Reynolds stresses on a regular
+(y, z) grid, with the mean products already subtracted) and `statistics.png`
+(isovels and secondary-current vectors, comparable with T&N Figs. 3 and 5). It
+also prints U_b/u_τ against the experimental target and the secondary-current
+magnitude as a percentage of U_max, which T&N report as ~2–4 %.
 
 Defaults are `tend = 400`, `tstat = 100` in units of H/u_τ. Kara et al. used
 only 12 H/u_τ of development and 23 H/u_τ of averaging; that is short for
