@@ -5,8 +5,10 @@
 #   ./run_cases.sh build              configure + compile
 #   ./run_cases.sh check              run the MGLET test suite
 #   ./run_cases.sh smoke   [case...]  20 steps at full size: does the grid load?
-#   ./run_cases.sh spinup  [case...]  short run: does it become turbulent?
-#   ./run_cases.sh run     [case...]  full production run
+#   ./run_cases.sh spinup  [case...]  stage 1: spin up, no statistics
+#   ./run_cases.sh run     [case...]  full production run (single stage)
+#   ./run_cases.sh average [case...]  restart a spinup with statistics on
+#                                    (TAVG=200 sets the averaging window)
 #   ./run_cases.sh monitor [case...]  development / stationarity diagnostics
 #   ./run_cases.sh stats   [case...]  assemble statistics into (y,z) fields
 #   ./run_cases.sh all                build + check + smoke + spinup (NOT run)
@@ -137,6 +139,37 @@ PY
     done
 }
 
+# Stage 2: restart from a finished spinup with statistics switched on.
+# tstat and tend are decided from the observed spinup, not guessed in advance.
+do_average() {
+    local tavg="${TAVG:-200}"
+    for c in $@; do
+        local src="$HERE/$c.spinup" dst="$HERE/$c.avg"
+        [[ -f "$src/fields.h5" ]] || die "no $src/fields.h5 - run '$0 spinup $c' first"
+        mkdir -p "$dst"
+        ln -sf "$HERE/$c/grids.h5" "$dst/grids.h5"
+        cp -f "$src/fields.h5" "$dst/restart.h5"
+        python3 - "$HERE/$c/parameters.json" "$dst/parameters.json" \
+                  "$dst/restart.h5" "$tavg" <<'PY'
+import json, sys, h5py
+d = json.load(open(sys.argv[1]))
+with h5py.File(sys.argv[3], "r") as f:
+    t0 = float(f["RUNINFO"][-1]["TIMEPH"])
+tavg = float(sys.argv[4])
+d["io"]["infile"] = "restart.h5"
+d["io"]["outfile"] = "fields.h5"
+d["time"].update(read=True, continue_=True, tend=t0 + tavg, tstat=0.0)
+d["time"]["continue"] = d["time"].pop("continue_")
+# tstat = 0 with a restored timeph > 0 means statistics start immediately and
+# dt is frozen from the first step (src/timeloop_mod.F90:272,313), which is
+# what SPOD needs -- a strictly uniform sampling interval.
+json.dump(d, open(sys.argv[2], "w"), indent=4)
+print(f"    restarting at t = {t0:.2f}, averaging to t = {t0+tavg:.2f}")
+PY
+        launch "$dst" "average[$c]"
+    done
+}
+
 do_run() {
     for c in $@; do launch "$HERE/$c" "run[$c]"; done
 }
@@ -154,6 +187,7 @@ case "$cmd" in
     smoke)   do_smoke $targets ;;
     spinup)  do_spinup $targets ;;
     run)     do_run $targets ;;
+    average) do_average $targets ;;
     monitor) do_monitor $targets ;;
     stats)   do_stats $targets ;;
     all)
@@ -161,9 +195,9 @@ case "$cmd" in
         do_check
         do_smoke $CASES
         do_spinup $CASES
-        say "staged checks done. Review the spinup output, then: $0 run"
+        say "staged checks done. Inspect the spinup, pick t_start, then: TAVG=200 $0 average"
         ;;
     *)
-        sed -n '3,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+        sed -n '3,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
         exit 1 ;;
 esac
