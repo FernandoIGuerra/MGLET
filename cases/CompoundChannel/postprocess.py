@@ -290,6 +290,14 @@ def main():
     else:
         f, y, z, fluid, tsamp = collapse_builtin(args.case)
     print(f"backend: {backend}")
+    if not tsamp or tsamp <= 0.0:
+        sys.exit(
+            f"\nTSAMP = {tsamp} -- this run collected NO statistics.\n"
+            "The ladder rungs (coarse/middle/finer) set tstat = 1e9 on purpose:\n"
+            "they are field generators, not measurement runs.\n"
+            "Restart the rung with averaging on:\n"
+            f"    TAVG=50 ./run_cases.sh average {os.path.basename(os.path.abspath(args.case))}\n"
+            "then post-process the resulting <rung>.avg directory.")
 
     with open(os.path.join(args.case, "parameters.json")) as fh:
         par = json.load(fh)

@@ -14,8 +14,8 @@
 #   ./run_cases.sh ladder  [case...]  all rungs in one go
 #   ./run_cases.sh spinup  [case...]  spin up directly on the fine grid
 #   ./run_cases.sh run     [case...]  full production run (single stage)
-#   ./run_cases.sh average [case...]  restart a spinup with statistics on
-#                                    (TAVG=200 sets the averaging window)
+#   ./run_cases.sh average [case...]  restart ANY run with statistics on,
+#                                    e.g. a rung: TAVG=50 ... Dr05.L120
 #   ./run_cases.sh monitor [case...]  development / stationarity diagnostics
 #   ./run_cases.sh stats   [case...]  assemble statistics into (y,z) fields
 #   ./run_cases.sh all                build + check + smoke + spinup (NOT run)
@@ -326,14 +326,23 @@ PY
 do_average() {
     local tavg="${TAVG:-200}"
     for c in $@; do
-        local src="$HERE/$c.dev" dst="$HERE/$c.avg"
-        [[ -f "$src/fields.h5" ]] || src="$HERE/$c.spinup"
-        [[ -f "$src/fields.h5" ]] || die "no developed field - run '$0 coarse $c && $0 map $c' first"
+        local src dst base
+        if [[ -f "$HERE/$c/fields.h5" ]]; then
+            src="$HERE/$c"; base="$HERE/$c"          # a ladder rung: restart in place
+        elif [[ -f "$HERE/$c.dev/fields.h5" ]]; then
+            src="$HERE/$c.dev"; base="$HERE/$c"
+        elif [[ -f "$HERE/$c.spinup/fields.h5" ]]; then
+            src="$HERE/$c.spinup"; base="$HERE/$c"
+        else
+            die "no developed field for '$c' (looked in $c/, $c.dev/, $c.spinup/)"
+        fi
+        dst="$HERE/$c.avg"
         mkdir -p "$dst"
-        ln -sf "$HERE/$c/grids.h5" "$dst/grids.h5"
+        ln -sf "$(readlink -f "$src/grids.h5")" "$dst/grids.h5"
         cp -f "$src/fields.h5" "$dst/restart.h5"
-        python3 - "$HERE/$c/parameters.json" "$dst/parameters.json" \
-                  "$dst/restart.h5" "$tavg" <<'PY'
+        say "average[$c]: source $(basename "$src"), TAVG=$tavg"
+        python3 - "$base/parameters.json" "$dst/parameters.json" \
+                  "$dst/restart.h5" "$tavg" <<'PYAVG'
 import json, sys, h5py
 d = json.load(open(sys.argv[1]))
 with h5py.File(sys.argv[3], "r") as f:
@@ -341,14 +350,18 @@ with h5py.File(sys.argv[3], "r") as f:
 tavg = float(sys.argv[4])
 d["io"]["infile"] = "restart.h5"
 d["io"]["outfile"] = "fields.h5"
-d["time"].update(read=True, continue_=True, tend=t0 + tavg, tstat=0.0)
-d["time"]["continue"] = d["time"].pop("continue_")
 # tstat = 0 with a restored timeph > 0 means statistics start immediately and
-# dt is frozen from the first step (src/timeloop_mod.F90:272,313), which is
-# what SPOD needs -- a strictly uniform sampling interval.
+# dt is frozen from the first step (src/timeloop_mod.F90:272,313) - which is
+# what SPOD needs, a strictly uniform sampling interval.
+d["time"].update(read=True, tend=t0 + tavg, tstat=0.0, itinfo=50)
+d["time"]["continue"] = True
+# the ladder rungs strip the statistics block; put it back
+d.setdefault("statistics", ["U_AVG", "V_AVG", "W_AVG", "P_AVG",
+                            "UU_AVG", "VV_AVG", "WW_AVG",
+                            "UV_AVG", "UW_AVG", "VW_AVG"])
 json.dump(d, open(sys.argv[2], "w"), indent=4)
 print(f"    restarting at t = {t0:.2f}, averaging to t = {t0+tavg:.2f}")
-PY
+PYAVG
         launch "$dst" "average[$c]"
     done
 }
