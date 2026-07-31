@@ -215,13 +215,28 @@ def write_grids(blk, path):
                 grp2.create_dataset("LEVEL1", data=arr)
 
 
-def ic_expression(component, blk):
+def ic_expression(component, blk, noise=0.10):
     """Initial condition: log-law on the local bed + deterministic modes.
 
-    tu_level noise is only applied when uinf is a constant vector
-    (src/flow/flow_mod.F90:195), so the perturbation has to live inside the
-    expression.  Deterministic modes are used rather than 'rand' so that the
-    expression stays time-independent.
+    MGLET's tu_level is only applied when uinf is a constant vector
+    (src/flow/flow_mod.F90:195), never on the expression path, so the
+    perturbation has to live inside the expression itself.
+
+    Two ingredients:
+      * deterministic modes, which seed streamwise-varying structure, and
+      * per-cell random noise via 'rand' (exprtk updates it for every cell,
+        src/core/exprtk_wrapper.cxx:258), which is broadband and breaks every
+        symmetry -- the equivalent of the 10 % turbulence level used in the
+        reference thesis.
+
+    Using 'rand' marks the expression time-dependent, which makes MGLET call
+    setboundarybuffers every RK substage.  That is harmless here: bfront and
+    friends return immediately for anything that is not FIX or OP1
+    (src/flow/setboundarybuffers_mod.F90:58), and this case has only CON, NOS
+    and SLI faces, so the expression is never re-evaluated after t = 0.
+
+    Note the RNG is seeded from std::random_device, so a run with noise > 0 is
+    NOT bit-reproducible.  Use --ic-noise 0 for a deterministic initial field.
     """
     step, lx, dr = blk.step, blk.lx, blk.dr
     common = f"""\
@@ -243,15 +258,20 @@ var shape := sin(pi*eta);
 var px := 2.0*pi*x/lx;
 var pz := 2.0*pi*z/{Z_TOTAL};
 """
+    common += f"var namp := {noise:.4f}*ulog;\n"
+    common += f"var camp := {noise:.4f}*ulog*shape;\n"
     if component == "u":
         body = ("ulog*(1.0 + 0.15*sin(3.0*px)*cos(6.0*pz)\n"
-                "             + 0.10*sin(5.0*px)*cos(10.0*pz));\n")
+                "             + 0.10*sin(5.0*px)*cos(10.0*pz))\n"
+                "    + namp*(rand - 0.5)*2.0;\n")
     elif component == "v":
         body = ("0.8*shape*(sin(3.0*px)*cos(6.0*pz)\n"
-                "           + 0.6*sin(5.0*px)*cos(11.0*pz));\n")
+                "           + 0.6*sin(5.0*px)*cos(11.0*pz))\n"
+                "    + camp*(rand - 0.5)*2.0;\n")
     else:
         body = ("0.8*shape*(cos(3.0*px)*sin(6.0*pz)\n"
-                "           + 0.6*cos(5.0*px)*sin(11.0*pz));\n")
+                "           + 0.6*cos(5.0*px)*sin(11.0*pz))\n"
+                "    + camp*(rand - 0.5)*2.0;\n")
     return common + body
 
 
@@ -376,7 +396,8 @@ def initial_dt(blk, re_tau, cfl, safety=0.9):
 
 
 def write_parameters(blk, re_tau, path, tend, tstat, dt, cfl, lesmodel,
-                     spod_planes, spod_sub, spod_surface, probe_itsamp):
+                     spod_planes, spod_sub, spod_surface, probe_itsamp,
+                     ic_noise=0.10):
     rh = hydraulic_radius(blk.dr)
     params = {
         "time": {
@@ -400,7 +421,8 @@ def write_parameters(blk, re_tau, path, tend, tstat, dt, cfl, lesmodel,
             "gmol": 1.0 / re_tau,
             "rho": 1.0,
             "gradp": [-1.0 / rh, 0.0, 0.0],
-            "uinf": [ic_expression(c, blk) for c in ("u", "v", "w")],
+            "uinf": [ic_expression(c, blk, ic_noise)
+                     for c in ("u", "v", "w")],
             "pressuresolver": {
                 "type": "sip",
                 "epcorr": 5e-5,
@@ -476,6 +498,10 @@ def main():
                    help="cross-plane point subsampling relative to the LES grid")
     p.add_argument("--no-surface", action="store_true",
                    help="omit the near-surface x-z plane")
+    p.add_argument("--ic-noise", type=float, default=0.10,
+                   help="per-cell random noise in the initial condition, as a "
+                        "fraction of the local mean (0 disables, giving a "
+                        "reproducible deterministic field)")
     p.add_argument("--probe-itsamp", type=int, default=80,
                    help="probe sampling interval in timesteps")
     args = p.parse_args()
@@ -499,7 +525,7 @@ def main():
     write_parameters(blk, re_tau, os.path.join(args.outdir, "parameters.json"),
                      args.tend, args.tstat, dt0, args.cfl, args.lesmodel,
                      args.spod_planes, args.spod_sub, not args.no_surface,
-                     args.probe_itsamp)
+                     args.probe_itsamp, args.ic_noise)
 
     ncells = blk.ngrid * blk.cx * blk.cy * blk.cz
     dnu = 1.0 / re_tau
