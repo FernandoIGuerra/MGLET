@@ -14,11 +14,12 @@ built-in reader if mgtools is not installed.
     python3 postprocess.py <casedir> [--mgtools-path DIR]
 
 Writes <casedir>/post/:
-    xsec.csv        the collapsed cross-section, one row per (y,z)
-    profiles_z.csv  depth-averaged lateral distributions (T&N Figs. 5, 8)
-    profiles_y.csv  vertical profiles at named stations (T&N Fig. 7)
+    xsec.csv        THE collapsed y-z plane, one row per (y, z)
     meta.json       Dr, Re_tau, normalisations, sampling time
-    xsec.vtr        VTK rectilinear grid for ParaView
+    xsec.vtr        the same plane as a VTK rectilinear grid for ParaView
+
+--profiles additionally writes the derived 1-D distributions
+(profiles_z.csv, profiles_y.csv), which are not needed for the plane itself.
 """
 
 import argparse
@@ -273,6 +274,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("case")
     ap.add_argument("--mgtools-path", default=os.environ.get("MGTOOLS_PATH"))
+    ap.add_argument("--profiles", action="store_true",
+                    help="also write the derived 1-D profile files")
     ap.add_argument("--builtin", action="store_true",
                     help="skip mgtools even if available")
     args = ap.parse_args()
@@ -298,8 +301,6 @@ def main():
 
     ub = float(np.nanmean(f["U"][fluid]))
     umax = float(np.nanmax(f["U"]))
-    lat = lateral(f, y, z, fluid, nu)
-    vert = vertical(f, y, z, fluid, nu)
 
     out = os.path.join(args.case, "post")
     os.makedirs(out, exist_ok=True)
@@ -316,24 +317,28 @@ def main():
                 fh.write(f"{Y[j,kz]:.6g},{Z[j,kz]:.6g},"
                          f"{int(fluid[j,kz])},{vals}\n")
 
-    with open(os.path.join(out, "profiles_z.csv"), "w") as fh:
-        fh.write("z,depth,Ud,Ud_over_Ub,tau_bed,tau_over_taubar,"
-                 "utau_local,tau_linear,utau_loglaw,q_unit\n")
-        tbar = float(np.mean(lat["tau_bed"]))
-        for i in range(len(lat["z"])):
-            fh.write(f"{lat['z'][i]:.6g},{lat['depth'][i]:.6g},"
-                     f"{lat['Ud'][i]:.6g},{lat['Ud'][i]/ub:.6g},"
-                     f"{lat['tau_bed'][i]:.6g},{lat['tau_bed'][i]/tbar:.6g},"
-                     f"{np.sqrt(abs(lat['tau_bed'][i])):.6g},"
-                     f"{lat['tau_linear'][i]:.6g},{lat['utau_loglaw'][i]:.6g},"
-                     f"{lat['q_unit'][i]:.6g}\n")
-
-    with open(os.path.join(out, "profiles_y.csv"), "w") as fh:
-        fh.write("station,z,y,y_wall,y_plus,U,uu,vv,ww,uv\n")
-        for r in vert:
-            fh.write(f"{r[0]},{r[1]:.6g},{r[2]:.6g},{r[3]:.6g},{r[4]:.6g},"
-                     f"{r[5]:.6g},{r[6]:.6g},{r[7]:.6g},{r[8]:.6g},"
-                     f"{r[9]:.6g}\n")
+    if args.profiles:
+        lat = lateral(f, y, z, fluid, nu)
+        vert = vertical(f, y, z, fluid, nu)
+        with open(os.path.join(out, "profiles_z.csv"), "w") as fh:
+            fh.write("z,depth,Ud,Ud_over_Ub,tau_bed,tau_over_taubar,"
+                     "utau_local,tau_linear,utau_loglaw,q_unit\n")
+            tbar = float(np.mean(lat["tau_bed"]))
+            for i in range(len(lat["z"])):
+                fh.write(f"{lat['z'][i]:.6g},{lat['depth'][i]:.6g},"
+                         f"{lat['Ud'][i]:.6g},{lat['Ud'][i]/ub:.6g},"
+                         f"{lat['tau_bed'][i]:.6g},"
+                         f"{lat['tau_bed'][i]/tbar:.6g},"
+                         f"{np.sqrt(abs(lat['tau_bed'][i])):.6g},"
+                         f"{lat['tau_linear'][i]:.6g},"
+                         f"{lat['utau_loglaw'][i]:.6g},"
+                         f"{lat['q_unit'][i]:.6g}\n")
+        with open(os.path.join(out, "profiles_y.csv"), "w") as fh:
+            fh.write("station,z,y,y_wall,y_plus,U,uu,vv,ww,uv\n")
+            for r in vert:
+                fh.write(f"{r[0]},{r[1]:.6g},{r[2]:.6g},{r[3]:.6g},"
+                         f"{r[4]:.6g},{r[5]:.6g},{r[6]:.6g},{r[7]:.6g},"
+                         f"{r[8]:.6g},{r[9]:.6g}\n")
 
     write_vtr(os.path.join(out, "xsec.vtr"), y, z,
               {c: f[c] for c in cols} | {"fluid": fluid.astype(float)})
@@ -373,8 +378,9 @@ def main():
     print(f"  U_b/u_tau = {ub:.3f}  (target {UB_TARGET[dr]:.2f}, "
           f"{100*(ub/UB_TARGET[dr]-1):+.1f} %)")
     print(f"  U_max/u_tau = {umax:.3f}   TSAMP = {tsamp:.1f}")
-    print(f"  wrote {out}/ (xsec.csv, profiles_z.csv, profiles_y.csv, "
-          f"meta.json, xsec.vtr)")
+    extra = " + profiles_z.csv, profiles_y.csv" if args.profiles else ""
+    print(f"  wrote {out}/xsec.csv (the collapsed y-z plane), "
+          f"meta.json, xsec.vtr{extra}")
 
 
 if __name__ == "__main__":
