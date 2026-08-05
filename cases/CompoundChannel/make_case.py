@@ -325,7 +325,7 @@ def probe_arrays(blk, nx=64, ny=48, nz=100):
     return arrays
 
 
-def spod_arrays(blk, nplanes=16, sub=4, surface=True):
+def spod_arrays(blk, nplanes=16, sub=4, surface=True, xsub=None):
     """Cross-plane (y-z) sections at EQUALLY spaced x, plus a near-surface plane.
 
     Equal spacing is deliberate.  x is periodic and statistically homogeneous,
@@ -365,8 +365,14 @@ def spod_arrays(blk, nplanes=16, sub=4, surface=True):
     if surface:
         # Top cell centre, just under the rigid lid. Equally spaced in x and z
         # so this plane can be Fourier transformed in both directions.
+        #
+        # x is subsampled at the same rate as the cross-planes, not half of it:
+        # this plane is the top view of the free surface, and the vertical-axis
+        # vortices over the junction are what it has to resolve. At sub = 4 on
+        # the ncy = 80 grid that is dx = 0.16H, so a lambda_x = 1H vortex is
+        # carried by 6 points instead of 3.
         ysurf = (blk.ncy - 0.5) * blk.dy
-        nxs = max(4, blk.ncx // (2 * sub))
+        nxs = max(4, blk.ncx // (xsub or sub))
         arrays.append({
             "name": "surface",
             "variables": ["U", "V", "W", "P"],
@@ -397,7 +403,7 @@ def initial_dt(blk, re_tau, cfl, safety=0.9):
 
 def write_parameters(blk, re_tau, path, tend, tstat, dt, cfl, lesmodel,
                      spod_planes, spod_sub, spod_surface, probe_itsamp,
-                     ic_noise=0.10):
+                     ic_noise=0.10, spod_surface_sub=None):
     rh = hydraulic_radius(blk.dr)
     params = {
         "time": {
@@ -448,7 +454,7 @@ def write_parameters(blk, re_tau, path, tend, tstat, dt, cfl, lesmodel,
             "tstart": 0.0,
             "file": "probes.h5",
             "arrays": probe_arrays(blk) + spod_arrays(
-                blk, spod_planes, spod_sub, spod_surface),
+                blk, spod_planes, spod_sub, spod_surface, spod_surface_sub),
         },
     }
     with open(path, "w") as f:
@@ -498,6 +504,9 @@ def main():
                    help="cross-plane point subsampling relative to the LES grid")
     p.add_argument("--no-surface", action="store_true",
                    help="omit the near-surface x-z plane")
+    p.add_argument("--spod-surface-sub", type=int, default=None,
+                   help="x-subsampling of the free-surface plane "
+                        "(default: same as --spod-sub)")
     p.add_argument("--ic-noise", type=float, default=0.10,
                    help="per-cell random noise in the initial condition, as a "
                         "fraction of the local mean (0 disables, giving a "
@@ -525,7 +534,7 @@ def main():
     write_parameters(blk, re_tau, os.path.join(args.outdir, "parameters.json"),
                      args.tend, args.tstat, dt0, args.cfl, args.lesmodel,
                      args.spod_planes, args.spod_sub, not args.no_surface,
-                     args.probe_itsamp, args.ic_noise)
+                     args.probe_itsamp, args.ic_noise, args.spod_surface_sub)
 
     ncells = blk.ngrid * blk.cx * blk.cy * blk.cz
     dnu = 1.0 / re_tau
@@ -545,16 +554,28 @@ def main():
 
     if args.spod_planes:
         sp = spod_arrays(blk, args.spod_planes, args.spod_sub,
-                         not args.no_surface)
+                         not args.no_surface, args.spod_surface_sub)
         npts = sum(len(a["positions"]) for a in sp)
         nxsec = len(sp[0]["positions"])
         kmax = args.spod_planes // 2
-        print(f"  SPOD sampling   {args.spod_planes} y-z planes"
+        print(f"  SPOD sampling   {args.spod_planes} y-z plane(s)"
               f" ({nxsec} pts each) + surface, {npts} probe points")
-        print(f"                  dx_plane = {args.lx/args.spod_planes:.3f}H"
-              f"  ->  k_x modes n = 0..{kmax}"
-              f"  (lambda_x = {args.lx:g}H .. {args.lx/kmax:.2f}H)")
-        print(f"                  {npts*4*8/1e6:.1f} MB per sample;"
+        if kmax >= 1:
+            print(f"                  dx_plane = {args.lx/args.spod_planes:.3f}H"
+                  f"  ->  k_x modes n = 0..{kmax}"
+                  f"  (lambda_x = {args.lx:g}H .. {args.lx/kmax:.2f}H)")
+        else:
+            # One station cannot resolve any streamwise wavenumber: its
+            # spectrum is the sum over all k_x. The free-surface plane still
+            # gives k_x, since it spans x by construction.
+            print(f"                  single station at x = "
+                  f"{sp[0]['positions'][0][0]:.3f}H (= Lx/2): no k_x "
+                  f"resolution in the cross-plane;")
+            print(f"                  its SPOD mixes all k_x into each "
+                  f"frequency. The surface plane still resolves k_x.")
+        # MGLET writes probes in the working precision, which is single
+        # unless the build sets MGLET_REAL64 (CMakeLists.txt:33).
+        print(f"                  {npts*4*4/1e6:.2f} MB per sample;"
               f" use only t >= tstat = {args.tstat:g} for time FFTs")
 
 

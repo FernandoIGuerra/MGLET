@@ -1,0 +1,90 @@
+%==============================================================================
+%  Journal article -- master file
+%
+%  Compile:   make          (latexmk -pdf main.tex)
+%             make clean
+%
+%  Two-column, Times, journal-neutral, so that the manuscript compiles on any
+%  TeX Live installation.  To move to a publisher class, replace the
+%  \documentclass line and the front-matter block only; nothing in sections/
+%  needs to change:
+%
+%    Elsevier   \documentclass[preprint,5p,times]{elsarticle}
+%    JFM        \documentclass{jfm}
+%    APS        \documentclass[aps,pof,reprint]{revtex4-2}
+%==============================================================================
+\documentclass[10pt,a4paper,twocolumn]{article}
+
+\input{preamble}
+
+%------------------------------------------------------------------ toggles ---
+% Line numbers while drafting; dropped automatically by ./build.sh submit.
+\ifdraft\linenumbers\fi
+
+\begin{document}
+
+%============================================================== front matter ==
+% Declared here; typeset below.  These must sit outside \twocolumn[...], which
+% reads its argument in a way \author cannot survive.
+\title{\large\bfseries \TODO{Title to be decided}}
+
+\author[1]{Fernando Illacanchi}
+\author[1]{\TODO{Co-author}}
+\affil[1]{\TODO{Chair, Technical University of Munich, Munich, Germany}}
+
+\date{\small\today}
+
+% Title and abstract span both columns.
+\twocolumn[
+\begin{@twocolumnfalse}
+
+\maketitle
+
+\begin{center}
+\begin{minipage}{0.86\textwidth}
+\small
+\noindent\textbf{Abstract.}
+\TODO{One paragraph, written last. The classical five moves: (1) the
+configuration and why it matters; (2) what is not yet known; (3) what was done
+here --- LES at these parameters, SPOD, linear and resolvent analysis; (4) the
+two or three quantitative results, with numbers; (5) what they imply. No
+citations, no undefined symbols, no unexpanded abbreviations.}
+
+\medskip
+\noindent\textit{Keywords:}
+\TODO{compound open-channel flow; large-eddy simulation; spectral proper
+orthogonal decomposition; resolvent analysis; secondary currents}
+\end{minipage}
+\end{center}
+
+\bigskip
+
+\end{@twocolumnfalse}
+]
+
+%=================================================================== sections ==
+\input{sections/01_introduction}
+\input{sections/02_configuration}
+\input{sections/03_spod}
+\input{sections/04_linear_resolvent}
+\input{sections/05_results}
+\input{sections/06_conclusions}
+
+%============================================================== back matter ===
+\section*{Acknowledgements}
+\TODO{Funding, computing time (e.g.\ LRZ/GCS project ID), and people who helped
+but are not authors.}
+
+\section*{Declaration of interests}
+The authors report no conflict of interest.
+
+\section*{Data availability}
+\TODO{Repository or DOI, or a statement that data are available on request.}
+
+\appendix
+\input{sections/A1_appendix}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

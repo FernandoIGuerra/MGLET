@@ -1,0 +1,122 @@
+%==============================================================================
+%  (ii)  Flow configuration and large-eddy simulation
+%
+%  Everything a competent reader needs to reproduce the simulation, and nothing
+%  else.  Results belong in Sec. 5.
+%==============================================================================
+\section{Flow configuration and large-eddy simulation}
+\label{sec:config}
+
+%------------------------------------------------------------------------------
+\subsection{Flow configuration}
+\label{sec:config:geometry}
+
+\TODO{Asymmetric compound open channel: main channel of depth $H$, floodplain of
+depth $h$, depth ratio $\Dr = h/H$, total width, streamwise period $L_x$.
+Refer to \cref{fig:geometry} and give the boundary conditions explicitly:
+no-slip on bed, floodplain bed, sidewalls and step riser; frictionless rigid lid
+at the free surface; periodicity in $x$.  Justify the rigid lid from the Froude
+number and say plainly what it excludes.}
+
+\begin{figure}[t]
+  \centering
+  % \includegraphics[width=\columnwidth]{geometry}
+  \framebox[\columnwidth][c]{\rule{0pt}{3.4cm}\TODO{sketch of the cross-section}}
+  \caption{Compound open-channel configuration. \TODO{Define $H$, $h$, $\Dr$,
+  the junction position and the coordinate system in the caption; the caption
+  must be readable without the text.}}
+  \label{fig:geometry}
+\end{figure}
+
+The flow is driven by a uniform streamwise pressure gradient, so that the global
+momentum balance $\rho g I_e A = \bar{\tau} P$ fixes the friction velocity
+\begin{equation}
+  \utau^{2} = g I_e \Rh , \qquad \Rh = A/P ,
+  \label{eq:forcing}
+\end{equation}
+with $A$ the cross-sectional area and $P$ the wetted perimeter.
+\TODO{State the consequence: $\Retau$ is imposed, whereas
+$\Rey = 4\Ub \Rh/\nu$ --- equivalently $\Ub/\utau$ --- is an outcome of the
+simulation and therefore a validation metric rather than an input.}
+
+% Wider than a column, so table* (spans both, floats to the top of a page).
+\begin{table*}[t]
+  \centering
+  \caption{Simulation parameters. \TODO{One row per case; state which numbers
+  are inputs and which are outcomes.}}
+  \label{tab:cases}
+  \small
+  \begin{tabular}{lccccccccc}
+    \toprule
+    Case & $\Dr$ & Experiment & $\Retau$ & $\Rey$ & $\Ub/\utau$
+         & $\Delta x^{+}$ & $\Delta y^{+}$ & $\Delta z^{+}$ & Cells \\
+    \midrule
+    \TODO{} & & & & & & & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+%------------------------------------------------------------------------------
+\subsection{Governing equations and subgrid-scale model}
+\label{sec:config:les}
+
+The filtered incompressible Navier--Stokes equations are solved,
+\begin{equation}
+  \pd{\filt{u}_i}{x_i} = 0 ,
+  \label{eq:continuity}
+\end{equation}
+\begin{equation}
+  \begin{split}
+  \pd{\filt{u}_i}{t} + \pd{}{x_j}\!\left(\filt{u}_i \filt{u}_j\right)
+    = &-\frac{1}{\rho}\pd{\filt{p}}{x_i}
+       + \pd{}{x_j}\!\left[ 2\nu \filt{S}_{ij} \right] \\
+      &- \pd{\tau^{\sgs}_{ij}}{x_j} + f_i ,
+  \end{split}
+  \label{eq:momentum}
+\end{equation}
+where $\filt{S}_{ij} = \tfrac{1}{2}(\partial_j \filt{u}_i + \partial_i
+\filt{u}_j)$, $f_i$ is the driving pressure gradient of \cref{eq:forcing}, and
+the subgrid stress
+\begin{equation}
+  \tau^{\sgs}_{ij} - \tfrac{1}{3}\tau^{\sgs}_{kk}\delta_{ij}
+    = -2\nut \filt{S}_{ij}
+  \label{eq:sgs}
+\end{equation}
+is closed with \TODO{the model actually used --- name it, give its constant or
+its dynamic procedure, and cite it \citep{Germano1991}}.
+
+\TODO{Near-wall treatment: state the wall model, its branches, and the
+first-cell $\yp$ actually obtained, so that the reader can judge whether this is
+a wall-resolved or a wall-modelled LES.  Be precise about which
+\citep{WernerWengle1993}.}
+
+%------------------------------------------------------------------------------
+\subsection{Numerical method and grid}
+\label{sec:config:numerics}
+
+\TODO{Solver, discretisation and grid.  Staggered Cartesian finite volumes,
+spatial and temporal order, pressure--velocity coupling and the Poisson solver,
+the block-structured decomposition, and the resulting resolution in wall units.
+Cite the solver \citep{Manhart2004,Peller2006}.  Note that this paragraph
+describes the \emph{flow} solver; the solver for the resolvent problem is
+described separately in \cref{sec:resolvent:solver}.}
+
+%------------------------------------------------------------------------------
+\subsection{Initial transient, statistical convergence and sampling}
+\label{sec:config:sampling}
+
+\TODO{How the flow was initialised and how the transient was judged to be over.
+The rigorous statement for a periodic channel at constant $\d p/\d x$ is that
+the volume-integrated streamwise momentum equation reads
+$\d\Ub/\d t = (-\d p/\d x)/\rho - V^{-1}\oint \tau_w \,\d A$, so
+$\d\Ub/\d t \to 0$ \emph{is} the global force balance, not a proxy for it.
+Give the development time, the averaging window, and the resulting error bar on
+the slowest-converging quantity (the secondary currents), not just on $U$.}
+
+\TODO{Sampling for the spectral analysis: the $N$ equally spaced $y$--$z$
+planes, the near-surface plane, the sampling interval $\Delta t_s$, the Nyquist
+frequency, and any pre-filtering applied by the runtime sampler that must be
+compensated in the spectra.  Justify why $x$ is Fourier transformed rather than
+treated as a source of independent realisations --- equal-time decorrelation is
+the wrong test, since mean advection leaves the coherence
+$\gamma^2(\Delta x,\omega)$ large where $R_{uu}(\Delta x,0)$ vanishes.}

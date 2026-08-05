@@ -1,0 +1,16 @@
+# LaTeX build products -- main.pdf is regenerable, so it is not tracked either.
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.spl
+*.run.xml
+*.bcf
+main.pdf

@@ -1,0 +1,120 @@
+%==============================================================================
+%  (iv)  Linear and resolvent analysis -- the theory
+%
+%  This section is theory.  It says what operator is formed, on what base flow,
+%  under what assumptions, and how it is solved.  No results.
+%==============================================================================
+\section{Linear and resolvent analysis}
+\label{sec:resolvent}
+
+%------------------------------------------------------------------------------
+\subsection{Linearised dynamics about the turbulent mean}
+\label{sec:resolvent:linear}
+
+Decomposing the velocity and pressure into the long-time mean and a fluctuation,
+$\uvec = \meanx{\uvec} + \fluc{\uvec}$, and subtracting the mean equations,
+the fluctuation obeys
+\begin{equation}
+  \pd{\fluc{\uvec}}{t} + \Lop_{\meanx{U}}\fluc{\uvec} = \fluc{\vect{f}} ,
+  \qquad \nabla\cdot\fluc{\uvec} = 0 ,
+  \label{eq:lns}
+\end{equation}
+where $\Lop_{\meanx{U}}$ collects the terms linear in $\fluc{\uvec}$ ---
+advection by the mean, production against $\nabla\meanx{\uvec}$, the pressure
+gradient and viscous diffusion --- and
+\begin{equation}
+  \fluc{\vect{f}} = -\left( \fluc{\uvec}\cdot\nabla\fluc{\uvec}
+                    - \meanx{\fluc{\uvec}\cdot\nabla\fluc{\uvec}} \right)
+  \label{eq:forcing-def}
+\end{equation}
+is the fluctuating part of the Reynolds stress divergence. \Cref{eq:lns} is
+exact; no linearisation has been performed. The content of the analysis is the
+decision to treat $\fluc{\vect{f}}$ as an exogenous forcing and to ask how
+strongly the linear operator amplifies it \citep{McKeonSharma2010}.
+
+\TODO{State the modelling choices explicitly, because the interpretation of every
+later figure depends on them:
+(i) whether $\meanx{\uvec}$ is the mean of the LES or a modelled profile;
+(ii) whether a turbulent eddy viscosity is included in $\Lop$ and, if so, which
+--- this is not cosmetic, since it changes both the gains and the mode shapes;
+(iii) that the mean is two-dimensional here, $\meanx{U}(y,z)$, obtained by
+averaging in $x$ and $t$, so the operator is not the classical parallel
+shear-flow operator and the resolvent modes are two-dimensional
+cross-plane fields.}
+
+%------------------------------------------------------------------------------
+\subsection{The resolvent operator}
+\label{sec:resolvent:operator}
+
+Because the mean is streamwise homogeneous and statistically stationary,
+\cref{eq:lns} is block-diagonal in the streamwise wavenumber and frequency. With
+the ansatz
+\begin{equation}
+  \fluc{\vect{q}}(\xvec,t)
+    = \qhat(y,z;\kx,\omega)\,\e^{\ii(\kx x - \omega t)} + \mathrm{c.c.} ,
+  \label{eq:ansatz}
+\end{equation}
+each $(\kx,\omega)$ pair decouples, and
+\begin{equation}
+  \qhat = \Rop(\kx,\omega)\,\fhat ,
+  \qquad
+  \Rop = \Cop\left(-\ii\omega\Iop - \Lop_{\kx}\right)^{-1}\Bop ,
+  \label{eq:resolvent}
+\end{equation}
+where $\Bop$ restricts the forcing to the components and region of interest and
+$\Cop$ selects the output. The singular value decomposition of $\Rop$ in the
+energy inner product,
+\begin{equation}
+  \Wmat^{1/2}\Rop\,\Wmat^{-1/2}
+    = \sum_{j} \gaink_j \, \resu_j \, \resf_j^{*} ,
+  \qquad \gaink_1 \ge \gaink_2 \ge \dots ,
+  \label{eq:svd}
+\end{equation}
+gives the forcing modes $\resf_j$, the response modes $\resu_j$ and the gains
+$\gaink_j$, with $\gaink_1$ the largest energy amplification achievable at that
+$(\kx,\omega)$ and $\resu_1$ the structure that receives it.
+
+\TODO{Add the paragraph that ties this section to \cref{sec:spod}: under
+spatially white forcing, $\csd = \Rop\Rop^{*}$, so the SPOD modes of the flow
+and the resolvent response modes coincide and $\spodev_j = \gaink_j^{2}$
+\citep{Towne2018}. Where they do \emph{not} coincide, the discrepancy measures
+the colour of the true nonlinear forcing --- which is the physical content of
+the comparison in \cref{sec:results}, and should be presented as such rather
+than as agreement or disagreement.}
+
+\TODO{If the flow is strongly non-normal, say so and quantify it, since that is
+what makes $\gaink_1 \gg \gaink_2$ meaningful rather than incidental
+\citep{Trefethen1993}.}
+
+%------------------------------------------------------------------------------
+\subsection{Solver}
+\label{sec:resolvent:solver}
+
+% The solver subsection, as required.  It covers how the operator is built and
+% how (\ref{eq:resolvent})-(\ref{eq:svd}) are solved numerically.  The LES flow
+% solver is described in Sec. 2.3; keep the two clearly separate.
+
+\TODO{Discretisation of $\Lop_{\kx}$ in the cross-plane: the grid used (the LES
+grid, or a coarsened/collocation grid), the scheme for the $y$ and $z$
+derivatives, the treatment of the L-shaped domain and the step corner, and the
+boundary conditions imposed on $\fhat$ and $\qhat$ at the walls and at the rigid
+lid.}
+
+\TODO{Enforcement of the divergence-free constraint: whether the operator is
+projected onto a solenoidal basis, or the descriptor form
+$-\ii\omega\Mop\qhat = \Lop_{\kx}\qhat + \Bop\fhat$ with a singular $\Mop$ is
+retained and handled directly. State it --- these give different spurious modes
+and different conditioning.}
+
+\TODO{Solution of \cref{eq:svd}: whether $\Rop$ is formed explicitly by
+factorising $(-\ii\omega\Iop - \Lop_{\kx})$ once per $(\kx,\omega)$ and applying
+it repeatedly, or the leading singular triplets are obtained matrix-free by
+randomised SVD or by a Lanczos/Arnoldi iteration on $\Rop^{*}\Rop$. Give the
+matrix size, the number of $(\kx,\omega)$ pairs, and the cost per pair.}
+
+\TODO{Verification of the solver itself, kept separate from validation of the
+physics: grid convergence of $\gaink_1$, insensitivity to the domain truncation,
+and a reproduction of a published case (\eg plane Poiseuille or turbulent
+channel flow) for which the gains are tabulated in the literature. Report this
+in \cref{sec:results:validation}, or in \cref{app:verification} if it would
+interrupt the argument.}

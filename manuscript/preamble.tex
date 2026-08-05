@@ -1,0 +1,164 @@
+%==============================================================================
+%  Packages and notation.
+%
+%  Deliberately sober: Times text and maths, restrained headings, no colour, no
+%  rules, no decoration.  The page should look like a journal proof, not like a
+%  template.
+%
+%  Every symbol used more than twice in the manuscript has a macro here, so that
+%  a change of notation is a one-line edit.
+%==============================================================================
+
+%------------------------------------------------------------- fonts, encoding --
+% amsmath/amssymb must be loaded *before* newtxmath, or \Bbbk is defined twice.
+\usepackage{amsmath,amssymb}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{newtxtext}             % Times text
+\usepackage{newtxmath}             % matching Times maths
+\usepackage{microtype}
+
+%------------------------------------------------------------------- page ------
+\usepackage[a4paper,top=2.2cm,bottom=2.2cm,left=1.9cm,right=1.9cm]{geometry}
+\setlength{\columnsep}{7mm}
+\setlength{\parindent}{1.2em}      % indent, no inter-paragraph skip: journal style
+\usepackage{flushend}              % balance the two columns on the last page
+
+\usepackage[switch]{lineno}        % line numbers in the outer margin (two-column)
+\usepackage{authblk}
+\renewcommand\Authfont{\normalsize}
+\renewcommand\Affilfont{\small\itshape}
+\setlength{\affilsep}{0.6em}
+
+%--------------------------------------------------------------- headings ------
+% Small, bold, unnumbered-looking.  Nothing larger than \normalsize below the
+% title.
+\usepackage[explicit]{titlesec}
+\titleformat{\section}{\normalsize\bfseries}{\thesection.}{0.6em}{#1}
+\titleformat{\subsection}{\normalsize\itshape}{\thesubsection.}{0.6em}{#1}
+\titleformat{\subsubsection}[runin]{\normalsize\itshape}{}{0em}{#1.}
+\titlespacing*{\section}{0pt}{1.4ex plus .3ex}{0.7ex}
+\titlespacing*{\subsection}{0pt}{1.2ex plus .3ex}{0.5ex}
+\titlespacing*{\subsubsection}{0pt}{1.0ex plus .2ex}{0.5em}
+
+%--------------------------------------------------------------------- math ----
+% (amsmath and amssymb are loaded with the fonts above.)
+\usepackage{bm}
+\usepackage{mathtools}
+\usepackage{siunitx}
+\sisetup{range-units=single, per-mode=symbol}
+% Two-column columns are narrow: keep display equations short, and prefer
+% \begin{split} or multline over a single long line.
+\allowdisplaybreaks
+
+%------------------------------------------------------- floats and tables -----
+\usepackage{graphicx}
+\graphicspath{{figures/}}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{stfloats}              % allows [b] placement of figure*/table*
+\usepackage[font=small,labelfont=bf,labelsep=period]{caption}
+\usepackage{subcaption}
+% Anything wider than a column goes in figure* / table* and floats to the top of
+% a page.  Never scale a figure below ~80 % to force it into one column.
+
+%----------------------------------------------------- references and links ----
+\usepackage[round,authoryear]{natbib}
+\bibpunct{(}{)}{;}{a}{}{,}
+\setlength{\bibsep}{0pt plus 0.3ex}
+\renewcommand{\bibfont}{\small}
+\usepackage[hidelinks]{hyperref}   % no coloured boxes, no coloured text
+\usepackage[capitalise,nameinlink]{cleveref}
+\crefname{equation}{Eq.}{Eqs.}
+\Crefname{equation}{Equation}{Equations}
+\crefname{section}{Sec.}{Secs.}
+\crefname{figure}{Fig.}{Figs.}
+\crefname{table}{Table}{Tables}
+
+%------------------------------------------------------------- draft markup ----
+% \TODO{...}  placeholder --- set \draftfalse (or delete the text) at submission.
+% Grey and bracketed rather than red: visible on screen, invisible in spirit.
+\usepackage{xcolor}
+\definecolor{todogrey}{gray}{0.42}
+\newif\ifdraft\drafttrue
+% \draftfalse hides every \TODO and the line numbers -- do that at submission.
+\ifdraft
+  \newcommand{\TODO}[1]{\textcolor{todogrey}{\textit{[#1]}}}
+\else
+  \newcommand{\TODO}[1]{}
+\fi
+
+%==============================================================================
+%  Notation
+%==============================================================================
+
+%---------------------------------------------------------------- operators ----
+\newcommand{\pd}[2]{\frac{\partial #1}{\partial #2}}
+\newcommand{\pdd}[2]{\frac{\partial^{2} #1}{\partial #2^{2}}}
+\newcommand{\dd}[2]{\frac{\mathrm{d} #1}{\mathrm{d} #2}}
+\renewcommand{\d}{\mathrm{d}}
+\newcommand{\ii}{\mathrm{i}}
+\newcommand{\e}{\mathrm{e}}
+\newcommand{\avg}[1]{\left\langle #1 \right\rangle}
+\newcommand{\abs}[1]{\left\lvert #1 \right\rvert}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\ip}[2]{\left\langle #1 , #2 \right\rangle}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\Real}{Re}
+\DeclareMathOperator{\Imag}{Im}
+
+%----------------------------------------------------------------- vectors -----
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\mat}[1]{\mathsf{#1}}
+\newcommand{\uvec}{\vect{u}}
+\newcommand{\xvec}{\vect{x}}
+\newcommand{\nvec}{\vect{n}}
+
+%--------------------------------------------------- flow / configuration ------
+\newcommand{\Rey}{\mathit{Re}}
+\newcommand{\Retau}{\Rey_{\tau}}
+\newcommand{\Fro}{\mathit{Fr}}
+\newcommand{\utau}{u_{\tau}}
+\newcommand{\Ub}{U_{b}}
+\newcommand{\Umax}{U_{\max}}
+\newcommand{\Dr}{D_{r}}
+\newcommand{\Rh}{R_{h}}
+\newcommand{\yp}{y^{+}}
+\newcommand{\zp}{z^{+}}
+
+%----------------------------------------------------------- LES / averaging ---
+\newcommand{\filt}[1]{\widetilde{#1}}
+\newcommand{\test}[1]{\widehat{#1}}
+\newcommand{\sgs}{\mathrm{sgs}}
+\newcommand{\nut}{\nu_{t}}
+\newcommand{\meanx}[1]{\overline{#1}}
+\newcommand{\fluc}[1]{#1'}
+
+%------------------------------------------------------------------- SPOD ------
+\newcommand{\csd}{\mat{S}}
+\newcommand{\Wmat}{\mat{W}}
+\newcommand{\spodmode}{\vect{\psi}}
+\newcommand{\spodev}{\lambda}
+\newcommand{\nblk}{N_{\mathrm{b}}}
+\newcommand{\nfft}{N_{\mathrm{f}}}
+\newcommand{\kx}{k_{x}}
+\newcommand{\qhat}{\hat{\vect{q}}}
+
+%--------------------------------------------------- linear / resolvent --------
+\newcommand{\Lop}{\mat{L}}
+\newcommand{\Rop}{\mat{R}}
+\newcommand{\Mop}{\mat{M}}
+\newcommand{\Bop}{\mat{B}}
+\newcommand{\Cop}{\mat{C}}
+\newcommand{\Iop}{\mat{I}}
+\newcommand{\fhat}{\hat{\vect{f}}}
+\newcommand{\resu}{\vect{\phi}}
+\newcommand{\resf}{\vect{\varphi}}
+\newcommand{\gaink}{\sigma}
+
+%--------------------------------------------------------------- shorthand -----
+\newcommand{\ie}{i.e.\ }
+\newcommand{\eg}{e.g.\ }
+\newcommand{\cf}{cf.\ }

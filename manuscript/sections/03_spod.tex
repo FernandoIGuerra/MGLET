@@ -1,0 +1,76 @@
+%==============================================================================
+%  (iii)  Spectral proper orthogonal decomposition
+%
+%  Theory and the estimator actually used.  No results here.
+%==============================================================================
+\section{Spectral proper orthogonal decomposition}
+\label{sec:spod}
+
+%------------------------------------------------------------------------------
+\subsection{Formulation}
+\label{sec:spod:formulation}
+
+Let $\vect{q}(\xvec,t)$ denote the fluctuation of the state vector about the
+long-time mean, $\vect{q} = \vect{u} - \meanx{\vect{u}}$. For a flow that is
+statistically stationary in time and homogeneous in the streamwise direction,
+the two-point space--time correlation depends on $t$ and $x$ only through the
+separations $\tau$ and $\Delta x$, so the correlation tensor is diagonalised by
+a Fourier transform in both. Writing $\qhat(\kx,\cdot,\omega)$ for the
+transformed fluctuation, the cross-spectral density tensor at each
+wavenumber--frequency pair is
+\begin{equation}
+  \csd(\kx,\omega)
+    = \avg{\, \qhat(\kx,\omega)\,\qhat^{*}(\kx,\omega) \,} ,
+  \label{eq:csd}
+\end{equation}
+where $(\cdot)^{*}$ denotes the conjugate transpose and $\avg{\cdot}$ the
+expectation over realisations.
+
+SPOD modes are the eigenvectors of \cref{eq:csd} in the energy inner product
+$\ip{\vect{q}_1}{\vect{q}_2} = \vect{q}_2^{*}\Wmat\vect{q}_1$, with $\Wmat$ the
+positive-definite matrix of cell volumes:
+\begin{equation}
+  \csd(\kx,\omega)\,\Wmat\,\spodmode_j(\kx,\omega)
+    = \spodev_j(\kx,\omega)\,\spodmode_j(\kx,\omega) ,
+  \label{eq:spod-eig}
+\end{equation}
+with the eigenvalues ordered $\spodev_1 \ge \spodev_2 \ge \dots \ge 0$.
+The modes are orthonormal, $\ip{\spodmode_i}{\spodmode_j} = \delta_{ij}$, each
+$\spodev_j$ is the expected energy of the flow projected onto $\spodmode_j$, and
+the expansion is optimal in the sense that no other orthonormal basis captures
+more energy in the first $n$ modes at that $(\kx,\omega)$
+\citep{Lumley1970,Towne2018}.
+
+\TODO{Add the one sentence that makes the choice of SPOD --- rather than
+space-only POD or DMD --- non-arbitrary for this flow: SPOD modes at a single
+frequency evolve coherently in time and are the structures that a
+statistically stationary flow actually sustains, whereas space-only POD mixes
+frequencies into a single mode.}
+
+%------------------------------------------------------------------------------
+\subsection{Estimation from the simulation}
+\label{sec:spod:estimator}
+
+\TODO{The estimator, stated so that it is reproducible.  Welch's method
+\citep{Welch1967}: $\nblk$ blocks of $\nfft$ snapshots with $50\,\%$ overlap and
+a \TODO{Hamming} window; the resulting frequency resolution
+$\Delta f = 1/(\nfft \Delta t_s)$ and bandwidth; the discrete FFT in $x$ over
+the $N$ sampled planes, giving $\kx = 2\pi n/L_x$ for $n = 0,\dots,N/2$; and the
+eigendecomposition of the $\nblk \times \nblk$ Gram matrix rather than of
+$\csd$ itself, since $\nblk \ll$ the number of grid points.}
+
+\begin{equation}
+  \csd(\kx,\omega) \approx
+    \frac{1}{\nblk}\sum_{m=1}^{\nblk}
+      \qhat^{(m)}(\kx,\omega)\,\qhat^{(m)*}(\kx,\omega) ,
+  \label{eq:welch}
+\end{equation}
+
+\TODO{Convergence: how many blocks were available, and the resulting uncertainty
+on $\spodev_1$.  State honestly which modes are converged --- typically the
+leading one --- and which are reported as indicative only.  Note that $\pm\kx$
+are complex conjugates and so do not supply additional realisations.}
+
+\TODO{Normalisation and presentation conventions: whether spectra are premultiplied
+by $\omega$, how modes are phase-aligned before plotting, and the energy measure
+used ($\spodev_1/\sum_j \spodev_j$ as the low-rank indicator).}

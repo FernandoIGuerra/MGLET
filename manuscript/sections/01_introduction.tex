@@ -1,0 +1,61 @@
+%==============================================================================
+%  (i)  Introduction
+%==============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+% -----------------------------------------------------------------------------
+% Move 1 -- the physical setting, and why anyone should care.
+% Two or three paragraphs.  Keep it concrete: what the flow is, where it occurs,
+% what quantity practice actually needs from it.
+% -----------------------------------------------------------------------------
+\TODO{Open on the configuration itself --- compound open-channel flow, the
+main-channel/floodplain junction, the shear layer and the vertical-axis vortices
+it sheds --- and on the engineering quantity that depends on them (conveyance,
+lateral momentum and mass exchange, sediment and pollutant transport).
+Cite the canonical experiments and the depth-averaged modelling tradition
+\citep{Tominaga1991,ShionoKnight1991,Nezu2005}.}
+
+% -----------------------------------------------------------------------------
+% Move 2 -- what is already known.  Organise by *idea*, not by paper.
+% One paragraph per strand of literature; each ends with what that strand still
+% leaves open.  Do not write an annotated bibliography.
+% -----------------------------------------------------------------------------
+\TODO{Strand 1 --- experiments and eddy-resolving simulation of compound
+channels: what has been measured and computed, and what is settled
+\citep{Tominaga1991,Kara2012}.}
+
+\TODO{Strand 2 --- coherent-structure decompositions of wall and free-surface
+turbulence: POD, SPOD, and what they have revealed elsewhere
+\citep{Lumley1970,Towne2018,SchmidtColonius2020}.}
+
+\TODO{Strand 3 --- linear and resolvent analysis as a predictive rather than
+descriptive tool: amplification of a turbulent mean flow, the non-normality
+argument, and the cases where the leading resolvent mode has been shown to
+recover the leading SPOD mode \citep{Trefethen1993,McKeonSharma2010,Towne2018}.}
+
+% -----------------------------------------------------------------------------
+% Move 3 -- the gap.  One paragraph, and it must be a *specific* gap, phrased so
+% that the present work closes it.  "Has not been done" is weak; "the mechanism
+% selecting X remains unexplained because Y has never been measured at the same
+% (k_x, omega)" is strong.
+% -----------------------------------------------------------------------------
+\TODO{State the gap in one or two sentences.}
+
+% -----------------------------------------------------------------------------
+% Move 4 -- what this paper does, and the paper map.
+% -----------------------------------------------------------------------------
+\TODO{One paragraph: wall-resolved/wall-modelled LES of the compound channel at
+$\Retau = \TODO{}$ and depth ratios $\Dr = \TODO{}$; SPOD of the resolved field
+at each streamwise wavenumber; resolvent analysis of the same mean flow;
+comparison of the two at matched $(\kx,\omega)$.}
+
+The paper is organised as follows.
+\Cref{sec:config} describes the flow configuration and the large-eddy
+simulation.
+\Cref{sec:spod} sets out the spectral proper orthogonal decomposition.
+\Cref{sec:resolvent} develops the linear and resolvent analysis, including the
+solver used to obtain the resolvent modes.
+\Cref{sec:results} presents the numerical results, beginning with validation
+against the reference data and continuing with \TODO{the analysis proper}.
+\Cref{sec:conclusions} concludes.

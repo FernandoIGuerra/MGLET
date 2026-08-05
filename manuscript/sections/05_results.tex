@@ -1,0 +1,117 @@
+%==============================================================================
+%  (v)  Numerical results and analysis
+%
+%  First validation, then the analysis proper.  The subsections after
+%  Sec. 5.1 are placeholders to be constructed as the results come in --
+%  rename and reorder them freely, but keep validation first.
+%==============================================================================
+\section{Numerical results and analysis}
+\label{sec:results}
+
+%==============================================================================
+\subsection{Validation}
+\label{sec:results:validation}
+
+% Everything here answers one question: is the simulation trustworthy enough
+% that the analysis which follows means anything?  Nothing new is claimed.
+% Order: global quantities first (one number that can be wrong on its own),
+% then profiles, then the quantities the rest of the paper actually relies on.
+
+\subsubsection{Global quantities}
+\TODO{The bulk velocity $\Ub/\utau$ against the experimental value, and the
+resulting $\Rey$. This is the primary check, because $\Retau$ is imposed and
+$\Ub/\utau$ is an outcome: it tests the momentum balance as a whole. Quote the
+deviation as a percentage and compare with the spread among the reference
+data sets.}
+
+\begin{table}[t]
+  \centering
+  \caption{Global validation. \TODO{Present $\Ub/\utau$, $\Umax/\Ub$ and the
+  secondary-current magnitude for each case, against experiment and against the
+  earlier LES.}}
+  \label{tab:validation}
+  \small
+  \begin{tabular}{lccc}
+    \toprule
+    Quantity & Present & Experiment & Deviation \\
+    \midrule
+    \TODO{} & & & \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsubsection{Mean flow and secondary currents}
+\TODO{Isovels in the cross-section with the secondary-current vectors, against
+the reference figures. Then the lateral distribution of depth-averaged velocity
+and of bed shear stress. Say what is captured (the junction vortex pair, the
+velocity dip, the shear-stress maximum) and, equally, what is not.}
+
+\begin{figure}[t]
+  \centering
+  % \includegraphics[width=\columnwidth]{isovels}
+  \framebox[\columnwidth][c]{\rule{0pt}{3.4cm}\TODO{isovels + secondary currents}}
+  \caption{\TODO{Mean streamwise velocity and in-plane vectors; present against
+  the reference data in the same axes and normalisation.}}
+  \label{fig:isovels}
+\end{figure}
+
+\subsubsection{Turbulence statistics}
+\TODO{Vertical profiles of $\meanx{U}$ in wall units at the main-channel,
+junction and floodplain stations, and the Reynolds stresses. State the sign
+convention used for $\avg{\fluc{u}\fluc{v}}$ explicitly, since it differs
+between the reference works.}
+
+\subsubsection{Adequacy of the sampling for the spectral analysis}
+\TODO{The check the later sections depend on, and which is easy to omit: that
+the record is long enough for the SPOD estimator. Report the number of
+independent blocks, the resulting confidence interval on $\spodev_1$, and the
+two-point coherence showing that $L_x$ is long enough that the largest resolved
+$\kx$ modes are not constrained by the box.}
+
+%==============================================================================
+% The analysis proper.  Placeholders -- rename as the results take shape.
+% Suggested spine, one subsection per claim, each claim falsifiable:
+%   5.2  what the SPOD spectra show           (which (k_x, omega) carry energy)
+%   5.3  what the leading modes look like     (the structures themselves)
+%   5.4  what the resolvent predicts          (gains, and the same modes)
+%   5.5  where the two agree, and what the disagreement means
+%   5.6  dependence on the depth ratio D_r
+%==============================================================================
+
+\subsection{\TODO{Energy distribution in the wavenumber--frequency plane}}
+\label{sec:results:spectra}
+
+\TODO{To be constructed. The SPOD eigenvalue spectra $\spodev_j(\kx,\omega)$:
+where the energy sits, whether the leading mode separates from the rest (the
+low-rank question), and at which $(\kx,\omega)$ that separation is largest.}
+
+%------------------------------------------------------------------------------
+\subsection{\TODO{Leading SPOD modes}}
+\label{sec:results:modes}
+
+\TODO{To be constructed. The structures themselves at the $(\kx,\omega)$
+identified above, and their physical identification --- junction shear-layer
+rollers, vertical-axis surface vortices, secondary-current modes.}
+
+%------------------------------------------------------------------------------
+\subsection{\TODO{Resolvent gains and response modes}}
+\label{sec:results:gains}
+
+\TODO{To be constructed. $\gaink_1(\kx,\omega)$ over the same plane as the SPOD
+spectra, plotted on the same axes and the same colour scale so that the two can
+be read against each other.}
+
+%------------------------------------------------------------------------------
+\subsection{\TODO{Comparison of SPOD and resolvent modes}}
+\label{sec:results:comparison}
+
+\TODO{To be constructed. The alignment $\abs{\ip{\spodmode_1}{\resu_1}}$ as a
+function of $(\kx,\omega)$. Frame the disagreement as a measurement of the
+forcing colour, not as a failure.}
+
+%------------------------------------------------------------------------------
+\subsection{\TODO{Effect of the depth ratio}}
+\label{sec:results:dr}
+
+\TODO{To be constructed. How the above changes with $\Dr$, and whether any
+scaling collapses the cases.}
